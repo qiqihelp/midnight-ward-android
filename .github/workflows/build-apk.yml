@@ -56,11 +56,11 @@ jobs:
           set -e
           "$BT/aapt2" dump badging MidnightWard-v2.0-cpp.apk | head -12
           echo "--- 横屏断言（screenOrientation 应出现在 badging）---"
-          "$BT/aapt2" dump badging MidnightWard-v2.0-cpp.apk | rg "launchable-activity"
-          "$BT/aapt2" dump xmltree --file AndroidManifest.xml MidnightWard-v2.0-cpp.apk | rg "screenOrientation"
+          "$BT/aapt2" dump badging MidnightWard-v2.0-cpp.apk | grep "launchable-activity"
+          "$BT/aapt2" dump xmltree --file AndroidManifest.xml MidnightWard-v2.0-cpp.apk | grep "screenOrientation"
           echo "--- 结构断言 ---"
-          unzip -l MidnightWard-v2.0-cpp.apk | rg "libmidnight_ward.so"
-          if unzip -l MidnightWard-v2.0-cpp.apk | rg -q "classes.dex"; then
+          unzip -l MidnightWard-v2.0-cpp.apk | grep "libmidnight_ward.so"
+          if unzip -l MidnightWard-v2.0-cpp.apk | grep -q "classes.dex"; then
             echo "错误：纯原生 APK 不应包含 DEX"; exit 1
           fi
           "$BT/apksigner" verify MidnightWard-v2.0-cpp.apk
