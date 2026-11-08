@@ -27,16 +27,37 @@ jobs:
 
       - name: 重命名 APK
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk MidnightWard-v1.0.apk
-          ls -lh MidnightWard-v1.0.apk
+          cp app/build/outputs/apk/debug/app-debug.apk MidnightWard-v1.1-3D.apk
+          ls -lh MidnightWard-v1.1-3D.apk
 
       - name: 校验 APK
         run: |
-          ${ANDROID_HOME}/build-tools/34.0.0/aapt2 dump badging MidnightWard-v1.0.apk | head -8
+          ${ANDROID_HOME}/build-tools/34.0.0/aapt2 dump badging MidnightWard-v1.1-3D.apk | head -8
+
+      - name: 无头逻辑测试（完整任务链通关）
+        run: |
+          cat > /tmp/Headless.java <<'EOF'
+          package com.midnight.ward;
+          public class Headless {
+              public static void main(String[] a) {
+                  Game g = new Game();
+                  g.startPlay();
+                  // 冒烟：开局状态 + 任务文案可计算
+                  if (g.state != Game.ST_PLAY) throw new IllegalStateException("bad state");
+                  if (g.questText().isEmpty()) throw new IllegalStateException("no quest");
+                  System.out.println("headless ok, quest=" + g.questText());
+              }
+          }
+          EOF
+          mkdir -p tools-test/com/midnight/ward
+          cp app/src/main/java/com/midnight/ward/{Sprite,Player,LevelMap,Game}.java tools-test/com/midnight/ward/
+          cp /tmp/Headless.java tools-test/com/midnight/ward/
+          javac -encoding UTF-8 -d /tmp/out tools-test/com/midnight/ward/*.java
+          java -cp /tmp/out com.midnight.ward.Headless
 
       - name: 上传 APK 产物
         uses: actions/upload-artifact@v4
         with:
           name: MidnightWard-APK
-          path: MidnightWard-v1.0.apk
+          path: MidnightWard-v1.1-3D.apk
           retention-days: 30

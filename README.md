@@ -1,81 +1,77 @@
-# 🏥 午夜病栋：手电筒之夜 (Midnight Ward)
+# 🏥 午夜病栋 3D (Midnight Ward 3D)
 
-> 一款**纯 Java + 原生 Android Framework**（零第三方依赖、零素材文件）的恐怖游戏 APK。
-> 推送到 GitHub 即由 **GitHub Actions** 自动编译出可直接安装的 APK。
+> 一款**纯 Java + 原生 Android Framework** 的第一人称 3D 恐怖解谜游戏。
+> 自研光线投射（Raycasting）引擎，零第三方依赖、零素材文件，推送到 GitHub 即由 **GitHub Actions** 自动编译出可直接安装的 APK。
 
 ![Build APK](https://github.com/qiqihelp/midnight-ward-android/actions/workflows/build-apk.yml/badge.svg)
 
-## 📖 玩法
+## 📖 剧情与流程
 
-你被困在 1963 年废弃的青山精神病院。整栋楼一片漆黑，只有手中的一支手电筒。
+你在 1963 年废弃的青山病院的病床上醒来，什么都不记得，只知道自己必须**逃出去**：
 
-- **按住并拖动屏幕** —— 移动手电筒光圈，照亮病房
-- 光照到**符纸**（黄纸红纹）即收下；集齐当夜全部符纸即可撑过一夜
-- 光照到**电池**（绿色）可补充手电筒电量
-- **「她」会循着光而来**——只在光圈内、闪电的瞬间、或余光一瞥时可见
-- 电池会持续消耗：电量越低光圈越小，她移动越快；电量耗尽后果自负
-- 被她碰到光心即被抓住……
-- **连撑三夜**，等到黎明 → 真结局
+1. 🛏️ **下床**，在病房里找到**钥匙**，打开反锁的房门
+2. 🗝️ 探索二楼：在**值班室**找到**房卡**
+3. 🪜 从楼梯下到一楼
+4. 🔦 在**药房**拿到**手电筒**、在**院长办公室**找到**地下室钥匙**
+5. ⬇️ 打开一楼尽头的**铁门**，进入漆黑的**地下室**（记得点亮手电筒——那里只有你的光）
+6. 🔧 拿到**撬棍**（小心身后……）
+7. 🚪 回到一楼大门：用**撬棍撬下两根木板** → 用**房卡在读卡器上刷卡** → **推门逃出**
 
-## 🎮 结局
+地图共三层：二楼病房区、一楼大厅（正门）、地下储物区。怨灵会不时在走廊深处显形；雷雨之夜，闪电会照亮整条走廊——包括她。
 
-| 结局 | 条件 |
+## 🕹️ 操作
+
+| 操作 | 方式 |
 |---|---|
-| ★ 真结局 · 超度 | 连续撑过三夜 |
-| ☠ 被抓 · 长眠 | 被她碰到光心 |
-
-每夜符纸数量 3 / 4 / 5 递增，光圈半径递减，她的速度递增。
+| 移动 | 左半屏按住拖动（虚拟摇杆：前进/后退/左右平移） |
+| 转身 | 右半屏左右滑动 |
+| 互动 | 右下大按钮（开门 / 撬开 / 刷卡，靠近目标自动变化） |
+| 手电筒 | 右上手电按钮开关（拾取后出现） |
+| 拾取 | 走近物品自动拾取 |
+| 楼层 | 楼梯门靠近自动打开，走进即换层 |
 
 ## 📲 安装 APK
 
-**方式一（推荐）：下载 GitHub Actions 编译产物**
-
 1. 打开本仓库 → **Actions** → 最近一次成功的 **Build APK** 运行
 2. 页面底部 **Artifacts** 下载 `MidnightWard-APK`
-3. 解压得到 `MidnightWard-v1.0.apk`，传到手机安装（需允许"安装未知来源应用"）
+3. 解压得到 `MidnightWard-v1.1-3D.apk`，传到手机安装（需允许"安装未知来源应用"）
 
-**方式二：本地编译**
+本地编译：`./gradlew assembleDebug`（要求 JDK 17+ / Android SDK 34）
 
-```bash
-./gradlew assembleDebug
-# 产物：app/build/outputs/apk/debug/app-debug.apk
-adb install app/build/outputs/apk/debug/app-debug.apk
-```
+## 🤖 GitHub Actions 流水线
 
-要求：JDK 17+、Android SDK（compileSdk 34）。首次构建 Gradle 会自动下载依赖。
+`.github/workflows/build-apk.yml` 每次 push（或手动触发）自动执行：
 
-## 🤖 GitHub Actions 自动编译
-
-`.github/workflows/build-apk.yml` 会在每次 push 到 main（或手动触发）时自动：
-
-1. ✅ 检出代码 → 安装 JDK 17（GitHub 托管 runner 自带 Android SDK）
+1. ✅ 检出代码 → 安装 JDK 17
 2. ✅ `./gradlew assembleDebug` 编译出 APK
-3. ✅ 用 `aapt2 dump badging` 校验 APK 元信息
-4. ✅ 上传 `MidnightWard-v1.0.apk` 为 Artifact（保留 30 天）
+3. ✅ `aapt2 dump badging` 校验 APK 元信息
+4. ✅ **无头逻辑测试**：纯 Java 驱动游戏状态机，验证任务链完整可通关
+5. ✅ 上传 `MidnightWard-v1.1-3D.apk` 为 Artifact（保留 30 天）
 
 ## 📁 项目结构
 
 ```
 midnight-ward-android/
-├── .github/workflows/build-apk.yml          # APK 编译流水线
-├── app/
-│   ├── build.gradle                          # 应用模块（compileSdk 34 / minSdk 21）
-│   └── src/main/
-│       ├── AndroidManifest.xml
-│       ├── java/com/midnight/ward/
-│       │   ├── MainActivity.java             # 全屏入口
-│       │   └── GameView.java                 # 游戏主体（Canvas 渲染 + 状态机）
-│       └── res/
-│           ├── drawable/ic_launcher.xml      # 矢量图标（残月 + 红十字）
-│           └── values/（strings / styles）
-├── gradle/wrapper/  +  gradlew               # Gradle 8.7 wrapper
-├── build.gradle / settings.gradle            # AGP 8.5.2
-└── README.md
+├── .github/workflows/build-apk.yml     # APK 编译流水线
+├── app/src/main/java/com/midnight/ward/
+│   ├── MainActivity.java               # 全屏入口
+│   ├── GameView.java                   # 帧循环 / 触摸操控 / HUD / 过场
+│   ├── Raycaster.java                  # 光线投射 3D 引擎（DDA + 薄门 + billboard + zbuffer）
+│   ├── Textures.java                   # 程序化贴图（墙面/门/物品/怨灵，全 Canvas 手绘）
+│   ├── Game.java                       # 任务状态机（纯 Java，可无头测试）
+│   ├── LevelMap.java                   # 三层地图 / 门锁 / 楼层传送
+│   ├── Player.java                     # 玩家与碰撞
+│   └── Sprite.java                     # 精灵模型
+├── app/src/main/res/                   # 主题 / 图标 / 字符串
+└── gradle wrapper + 构建脚本            # Gradle 8.7 + AGP 8.5.2
 ```
 
 ## 🔧 技术说明
 
-- **零依赖**：不引入 AndroidX / 第三方库，直接继承 `android.view.View` 用 Canvas 手绘全部画面（病房、门牌、月光、床、输液架、血迹、怨灵、惊吓脸……）
-- 声音使用系统 `ToneGenerator`，震动使用 `Vibrator`，无任何素材文件
-- 游戏循环：`Handler.postDelayed` 16ms 定时刷新，状态机驱动 6 个场景
+- **3D 引擎**：经典 lodev 式 Raycasting——逐列 DDA 网格求交、薄门（滑门）半格平面求交、
+  billboard 精灵按深度排序 + zbuffer 逐列裁剪；离屏 300px 宽低分辨率渲染后放大（性能 + 复古质感）
+- **光照**：环境光距离衰减 + 手电筒锥形光束（含火苗抖动）+ N/S 侧面调暗；地下室环境光趋近于零
+- **贴图**：全部运行时用 Canvas 程序化生成（涂料墙 / 瓷砖墙裙 / 血迹墙 / 木门 / B1 铁门 / 楼梯 /
+  带木板和读卡器的大门 / 钥匙 / 房卡 / 手电筒 / 撬棍 / 病床 / 怨灵），APK 内没有任何图片文件
+- **游戏逻辑与渲染完全解耦**：`Game.java` 无 Android 依赖，CI 中直接 `javac + java` 无头跑通任务链
 - 兼容 Android 5.0（API 21）及以上

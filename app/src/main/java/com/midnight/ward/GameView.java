@@ -1,12 +1,12 @@
 package com.midnight.ward;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
-import android.graphics.Path;
-import android.graphics.RadialGradient;
+import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.media.AudioManager;
@@ -20,46 +20,53 @@ import android.os.VibratorManager;
 import android.view.MotionEvent;
 import android.view.View;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Random;
 
 /**
- * 《午夜病栋》游戏主视图。
- *
- * 玩法：整栋病栋陷入黑暗，手指按住拖动即手电筒光圈。
- * 用光照到符纸与电池即可拾取；「她」会循着光而来——
- * 被她碰到光心即被抓住。收集齐当夜全部符纸即可撑过一夜，
- * 连撑三夜迎来真结局。电池会持续消耗，电量越低光圈越小、她越快。
+ * 游戏主视图：帧循环（低分辨率离屏渲染 + 放大）、触摸操控
+ * （左半屏虚拟摇杆移动 / 右半屏滑动转身 / 互动与手电筒按钮）、
+ * HUD（目标 / 物品 / 消息）与开场、胜利过场。
  */
-public class GameView extends View {
+public class GameView extends View implements Game.Sound {
 
-    // ------------------------------------------------------------------
-    // 状态机
-    // ------------------------------------------------------------------
-    private static final int S_TITLE = 0;   // 标题页
-    private static final int S_PLAY = 1;    // 游戏中
-    private static final int S_SCARE = 2;   // 惊吓瞬间
-    private static final int S_OVER = 3;    // 失败
-    private static final int S_WIN = 4;     // 真结局
-    private static final int S_CLEAR = 5;   // 过夜结算
-
-    private static final int TOTAL_NIGHTS = 3;
     private static final long FRAME_MS = 16;
+    private static final int RW = 300; // 离屏渲染宽度（像素风）
 
-    // ------------------------------------------------------------------
-    // 基础设施
-    // ------------------------------------------------------------------
-    private final float density;
-    private final Random rng = new Random();
-    private final Paint paint = new Paint();
-    private final Paint textPaint = new Paint();
-    private final Path lightPath = new Path();
+    private final Game game = new Game();
+    private final Textures tex = new Textures();
+    private final Raycaster ray = new Raycaster();
+
+    private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Typeface titleType;
     private final Typeface bodyType;
+
+    private Bitmap frame;
+    private Canvas frameCanvas;
+    private int rw, rh;
+    private final RectF dstRect = new RectF();
+
     private final Handler handler = new Handler(Looper.getMainLooper());
-    private ToneGenerator tone;
     private boolean ticking = false;
+    private ToneGenerator tone;
+    private long lastT = 0L;
+    private float flicker = 1f;
+    private final Random rng = new Random();
+
+    // 触摸
+    private int joyId = -1;
+    private int lookId = -1;
+    private float joyBaseX, joyBaseY;
+    private float joyVecX, joyVecY;   // -1..1
+    private float lastLookX;
+
+    // 按钮位置
+    private float btnX, btnY, btnR;        // 互动
+    private float torchX, torchY, torchR;  // 手电筒
+    private float defJoyX, defJoyY, joyR;  // 摇杆
+
+    private int w, h;
+    private float density;
 
     private final Runnable ticker = new Runnable() {
         @Override
@@ -67,56 +74,39 @@ public class GameView extends View {
             if (!ticking) {
                 return;
             }
-            update();
+            long now = System.currentTimeMillis();
+            float dt = lastT == 0L ? 0.016f : (now - lastT) / 1000f;
+            lastT = now;
+            if (dt <= 0f || dt > 0.05f) {
+                dt = 0.016f;
+            }
+            flicker = 0.9f + 0.1f * rng.nextFloat();
+            game.update(dt);
+            if (game.state == Game.ST_PLAY) {
+                if (joyId != -1 && (joyVecX != 0f || joyVecY != 0f)) {
+                    game.player.tryMove(game.lm, game, -joyVecY, joyVecX, dt);
+                }
+                float bob = (float) Math.sin(game.player.walkPhase) * rh * 0.012f;
+                ray.render(frameCanvas, rw, rh, game.lm, game, game.player, tex, bob, flicker);
+            }
             invalidate();
             handler.postDelayed(this, FRAME_MS);
         }
     };
-
-    // ------------------------------------------------------------------
-    // 游戏状态
-    // ------------------------------------------------------------------
-    private int state = S_TITLE;
-    private int night = 1;
-    private int nightFrames;
-    private int frame;
-
-    private int talismansFound;
-    private int talismansTotal;
-    private float battery = 100f;
-
-    private float lightX, lightY;         // 光圈当前位置
-    private float targetX, targetY;       // 手指位置
-    private float lightRadius;            // 当前光圈半径
-    private float baseLightRadius;        // 满电光圈半径
-
-    private float ghostX, ghostY, ghostPhase;
-    private boolean ghostActive;
-
-    private final List<float[]> talismans = new ArrayList<>(); // {x, y, 角度}
-    private final List<float[]> batteries = new ArrayList<>(); // {x, y, 角度}
-
-    private int scareTimer;
-    private int clearTimer;
-    private int lightningTimer;
-    private int lightningFlash;
-    private int glimpseTimer;
-
-    private int w, h;
-    private Shader darkShader;
-    private float darkX, darkY, darkR;
 
     public GameView(Context context) {
         super(context);
         density = getResources().getDisplayMetrics().density;
         titleType = Typeface.create(Typeface.SERIF, Typeface.BOLD);
         bodyType = Typeface.SANS_SERIF;
+        tex.init();
+        game.sound = this;
+        setKeepScreenOn(true);
         try {
-            tone = new ToneGenerator(AudioManager.STREAM_MUSIC, 60);
+            tone = new ToneGenerator(AudioManager.STREAM_MUSIC, 55);
         } catch (RuntimeException e) {
             tone = null;
         }
-        setKeepScreenOn(true);
     }
 
     // ------------------------------------------------------------------
@@ -126,6 +116,7 @@ public class GameView extends View {
     public void resume() {
         if (!ticking) {
             ticking = true;
+            lastT = 0L;
             handler.post(ticker);
         }
     }
@@ -156,219 +147,22 @@ public class GameView extends View {
         super.onSizeChanged(newW, newH, oldW, oldH);
         w = newW;
         h = newH;
-        targetX = w * 0.5f;
-        targetY = h * 0.55f;
-        if (lightRadius <= 0f) {
-            lightX = targetX;
-            lightY = targetY;
-            lightRadius = 150f * density;
-        }
-    }
+        density = getResources().getDisplayMetrics().density;
+        rw = RW;
+        rh = Math.max(160, Math.min(720, (int) (RW * (float) newH / newW)));
+        frame = Bitmap.createBitmap(rw, rh, Bitmap.Config.ARGB_8888);
+        frameCanvas = new Canvas(frame);
+        dstRect.set(0, 0, w, h);
 
-    // ------------------------------------------------------------------
-    // 主循环
-    // ------------------------------------------------------------------
-
-    private void update() {
-        frame++;
-        switch (state) {
-            case S_PLAY:
-                updatePlay();
-                break;
-            case S_SCARE:
-                if (scareTimer > 0) {
-                    scareTimer--;
-                    if (scareTimer == 0) {
-                        state = S_OVER;
-                    }
-                }
-                break;
-            case S_CLEAR:
-                if (clearTimer > 0) {
-                    clearTimer--;
-                    if (clearTimer == 0) {
-                        if (night >= TOTAL_NIGHTS) {
-                            state = S_WIN;
-                        } else {
-                            startNight(night + 1);
-                        }
-                    }
-                }
-                break;
-            default:
-                break;
-        }
-    }
-
-    private void updatePlay() {
-        nightFrames++;
-        // 手电筒光圈缓动跟随手指
-        lightX += (targetX - lightX) * 0.22f;
-        lightY += (targetY - lightY) * 0.22f;
-
-        // 电量消耗：约 80 秒耗尽
-        battery = Math.max(0f, battery - 0.021f);
-
-        // 光圈半径：随电量缩小 + 火苗抖动
-        float targetR = baseLightRadius * (0.45f + 0.55f * (battery / 100f));
-        lightRadius += (targetR - lightRadius) * 0.1f;
-        lightRadius *= (0.97f + 0.05f * rng.nextFloat());
-
-        // 雷电
-        if (lightningTimer > 0) {
-            lightningTimer--;
-        }
-        if (lightningTimer <= 0) {
-            lightningFlash = 8;
-            lightningTimer = (8 + rng.nextInt(10)) * 60;
-            playTone(ToneGenerator.TONE_PROP_NACK, 350);
-        }
-        if (lightningFlash > 0) {
-            lightningFlash--;
-        }
-
-        // 余光瞥见（她偶尔在光圈外显形一瞬）
-        if (glimpseTimer > 0) {
-            glimpseTimer--;
-        }
-        if (glimpseTimer <= 0) {
-            glimpseTimer = (4 + rng.nextInt(7)) * 60;
-        }
-
-        // 拾取：符纸
-        for (int i = talismans.size() - 1; i >= 0; i--) {
-            float[] it = talismans.get(i);
-            if (dist(it[0], it[1], lightX, lightY) < lightRadius * 0.9f) {
-                talismans.remove(i);
-                talismansFound++;
-                playTone(ToneGenerator.TONE_PROP_BEEP, 120);
-                vibrate(20);
-            }
-        }
-        // 拾取：电池
-        for (int i = batteries.size() - 1; i >= 0; i--) {
-            float[] bt = batteries.get(i);
-            if (dist(bt[0], bt[1], lightX, lightY) < lightRadius * 0.9f) {
-                batteries.remove(i);
-                battery = Math.min(100f, battery + 38f);
-                playTone(ToneGenerator.TONE_PROP_ACK, 120);
-                vibrate(20);
-            }
-        }
-
-        // 过夜判定
-        if (talismansFound >= talismansTotal) {
-            state = S_CLEAR;
-            clearTimer = 150;
-            playTone(ToneGenerator.TONE_PROP_BEEP2, 300);
-            return;
-        }
-
-        // 怨灵：循光而来
-        if (ghostActive) {
-            ghostPhase += 0.05f;
-            float speed = (0.55f + 0.4f * (night - 1)) * density;
-            if (battery < 25f) {
-                speed *= 1.6f; // 黑暗里她更快
-            }
-            float dx = lightX - ghostX;
-            float dy = lightY - ghostY;
-            float d = (float) Math.sqrt(dx * dx + dy * dy);
-            if (d > 1f) {
-                ghostX += dx / d * speed;
-                ghostY += dy / d * speed + ((float) Math.sin(ghostPhase)) * 0.5f;
-            }
-            if (d < 52f * density) {
-                // 被抓住
-                state = S_SCARE;
-                scareTimer = 80;
-                playTone(ToneGenerator.TONE_SUP_ERROR, 900);
-                vibrate(600);
-            }
-        }
-    }
-
-    private void startNight(int n) {
-        night = n;
-        nightFrames = 0;
-        talismansTotal = 2 + n;             // 3 / 4 / 5 张符纸
-        talismansFound = 0;
-        battery = 100f;
-        baseLightRadius = (150f - (n - 1) * 16f) * density;
-        talismans.clear();
-        batteries.clear();
-        for (int i = 0; i < talismansTotal; i++) {
-            talismans.add(randomSpot());
-        }
-        for (int i = 0; i < n + 1; i++) {
-            batteries.add(randomSpot());
-        }
-        ghostActive = true;
-        ghostX = (rng.nextBoolean() ? 0.1f : 0.9f) * w;
-        ghostY = (rng.nextBoolean() ? 0.15f : 0.85f) * h;
-        ghostPhase = 0f;
-        lightningTimer = (6 + rng.nextInt(8)) * 60;
-        lightningFlash = 0;
-        glimpseTimer = (4 + rng.nextInt(6)) * 60;
-        targetX = w * 0.5f;
-        targetY = h * 0.55f;
-        lightX = targetX;
-        lightY = targetY;
-        lightRadius = baseLightRadius;
-        state = S_PLAY;
-    }
-
-    private float[] randomSpot() {
-        for (int attempt = 0; attempt < 60; attempt++) {
-            float x = (0.08f + 0.84f * rng.nextFloat()) * w;
-            float y = (0.12f + 0.78f * rng.nextFloat()) * h;
-            boolean ok = true;
-            for (float[] t : talismans) {
-                if (dist(t[0], t[1], x, y) < 0.14f * w) {
-                    ok = false;
-                }
-            }
-            for (float[] t : batteries) {
-                if (dist(t[0], t[1], x, y) < 0.14f * w) {
-                    ok = false;
-                }
-            }
-            if (ok) {
-                return new float[]{x, y, rng.nextFloat() * 40f - 20f};
-            }
-        }
-        return new float[]{0.5f * w, 0.5f * h, 0f};
-    }
-
-    // ------------------------------------------------------------------
-    // 触摸
-    // ------------------------------------------------------------------
-
-    @Override
-    public boolean onTouchEvent(MotionEvent event) {
-        switch (event.getActionMasked()) {
-            case MotionEvent.ACTION_DOWN:
-                if (state == S_TITLE) {
-                    startNight(1);
-                } else if (state == S_OVER) {
-                    startNight(night); // 重试当前夜
-                } else if (state == S_WIN) {
-                    state = S_TITLE;
-                } else if (state == S_PLAY) {
-                    targetX = event.getX();
-                    targetY = event.getY();
-                }
-                return true;
-            case MotionEvent.ACTION_MOVE:
-            case MotionEvent.ACTION_UP:
-                if (state == S_PLAY) {
-                    targetX = event.getX();
-                    targetY = event.getY();
-                }
-                return true;
-            default:
-                return true;
-        }
+        btnR = 46f * density;
+        btnX = w - 70f * density;
+        btnY = h - 120f * density;
+        torchR = 32f * density;
+        torchX = w - 70f * density;
+        torchY = h - 260f * density;
+        joyR = 62f * density;
+        defJoyX = 120f * density;
+        defJoyY = h - 130f * density;
     }
 
     // ------------------------------------------------------------------
@@ -376,174 +170,184 @@ public class GameView extends View {
     // ------------------------------------------------------------------
 
     @Override
-    protected void onDraw(Canvas canvas) {
-        if (w == 0 || h == 0) {
-            canvas.drawColor(Color.BLACK);
-            return;
-        }
-        switch (state) {
-            case S_TITLE:
-                renderTitle(canvas);
-                break;
-            case S_PLAY:
-                renderPlay(canvas);
-                break;
-            case S_SCARE:
-                renderScare(canvas);
-                break;
-            case S_OVER:
-                renderOver(canvas);
-                break;
-            case S_CLEAR:
-                renderClear(canvas);
-                break;
-            case S_WIN:
-                renderWin(canvas);
-                break;
-            default:
-                canvas.drawColor(Color.BLACK);
-                break;
+    protected void onDraw(Canvas c) {
+        c.drawColor(Color.BLACK);
+        if (game.state == Game.ST_PLAY) {
+            if (frame != null) {
+                paint.reset();
+                paint.setAntiAlias(true);
+                paint.setFilterBitmap(true);
+                c.drawBitmap(frame, null, dstRect, paint);
+            }
+            drawHud(c);
+            // 闪电
+            if (game.flashFrames > 0) {
+                paint.reset();
+                paint.setAntiAlias(true);
+                paint.setColor(game.flashFrames > 3 ? 0x55FFFFFF : 0x22FFFFFF);
+                c.drawRect(0, 0, w, h, paint);
+            }
+            // 楼层传送黑场
+            if (game.fadeAlpha > 0f) {
+                paint.reset();
+                paint.setAntiAlias(true);
+                int a = (int) (Math.min(1f, game.fadeAlpha) * 255f);
+                paint.setColor(Color.argb(a, 0, 0, 0));
+                c.drawRect(0, 0, w, h, paint);
+            }
+        } else if (game.state == Game.ST_INTRO) {
+            drawIntro(c);
+        } else if (game.state == Game.ST_WIN) {
+            drawWin(c);
         }
     }
 
-    private void renderTitle(Canvas c) {
-        c.drawColor(0xFF050505);
-        // 背后极暗的病房剪影
-        c.save();
-        c.translate(0f, ((float) Math.sin(frame * 0.008f)) * 6f * density);
-        drawScene(c);
-        c.restore();
+    private void drawHud(Canvas c) {
+        Player p = game.player;
+
+        // 目标条
+        String quest = game.questText();
         paint.reset();
         paint.setAntiAlias(true);
-        paint.setColor(0xC4000000);
-        c.drawRect(0, 0, w, h, paint);
+        paint.setColor(0x88101010);
+        float qw = 320f * density;
+        c.drawRoundRect(new RectF(w / 2f - qw / 2f, 8f * density,
+                w / 2f + qw / 2f, 36f * density), 8f * density, 8f * density, paint);
+        drawTextCenter(c, quest, 29f * density, 14f * density, 0xFFE8E6D9, 240);
 
-        drawTextCenter(c, "午 夜 病 栋", h * 0.28f, 46f * density, 0xFFE8E6D9, 255);
-        drawTextCenter(c, "MIDNIGHT WARD", h * 0.28f + 30f * density, 13f * density, 0xFF8A8F8C, 255);
-        drawTextCenter(c, "—— 手电筒之夜 ——", h * 0.365f, 16f * density, 0xFFB03A3A, 255);
+        // 物品栏（左上）
+        float iy = 10f * density;
+        float iw = 22f * density;
+        if (p.hasKey) {
+            drawIcon(c, tex.sprites[Textures.S_KEY], iy, iy, iw);
+            iy += iw + 6f * density;
+        }
+        if (p.hasCard) {
+            drawIcon(c, tex.sprites[Textures.S_CARD], iy, 10f * density, iw);
+            iy += iw + 6f * density;
+        }
+        if (p.hasFlashlight) {
+            drawIcon(c, tex.sprites[Textures.S_TORCH], iy, 10f * density, iw);
+            iy += iw + 6f * density;
+        }
+        if (p.hasBasementKey) {
+            drawIcon(c, tex.sprites[Textures.S_KEY], iy, 10f * density, iw);
+            iy += iw + 6f * density;
+        }
+        if (p.hasCrowbar) {
+            drawIcon(c, tex.sprites[Textures.S_CROWBAR], iy, 10f * density, iw);
+        }
 
-        float lineY = h * 0.50f;
-        drawTextCenter(c, "▸ 按住并拖动屏幕，移动手电筒", lineY, 14f * density, 0xFFCFCFC6, 220);
-        drawTextCenter(c, "▸ 用光照到符纸与电池即可拾取", lineY + 24f * density, 14f * density, 0xFFCFCFC6, 220);
-        drawTextCenter(c, "▸ 「她」会循着光而来，别被碰到", lineY + 48f * density, 14f * density, 0xFFCFCFC6, 220);
-        drawTextCenter(c, "▸ 电量越低光圈越小，撑过三夜等到黎明", lineY + 72f * density, 14f * density, 0xFFCFCFC6, 220);
-
-        int breath = 120 + (int) (100 * (0.5 + 0.5 * Math.sin(frame * 0.05)));
-        drawTextCenter(c, "—— 触摸屏幕 开始第一夜 ——", h * 0.80f, 15f * density, 0xFFE8E6D9, breath);
-    }
-
-    private void renderPlay(Canvas c) {
-        c.drawColor(0xFF020202);
-
-        // 1) 只有光圈内能看到场景
-        lightPath.reset();
-        lightPath.addCircle(lightX, lightY, Math.max(4f, lightRadius), Path.Direction.CW);
-        int sc = c.save();
-        c.clipPath(lightPath);
-        drawScene(c);
-        c.restoreToCount(sc);
-
-        // 2) 光圈外的黑暗（径向渐变压暗全屏）
-        ensureDarkShader();
+        // 准星
         paint.reset();
         paint.setAntiAlias(true);
-        paint.setShader(darkShader);
-        c.drawRect(0, 0, w, h, paint);
-        paint.setShader(null);
+        paint.setColor(0x99FFFFFF);
+        c.drawCircle(w / 2f, h / 2f, 2.5f * density, paint);
 
-        // 3) 闪电：整屋亮一瞬（她也会现形）
-        if (lightningFlash > 0) {
-            drawScene(c);
+        // 消息（底部中间）
+        float msgY = h - 300f * density;
+        int shown = 0;
+        for (int i = game.messages.size() - 1; i >= 0 && shown < 2; i--) {
+            Game.Msg m = game.messages.get(i);
+            float alpha = Math.min(1f, m.life / 0.6f);
+            drawTextCenter(c, m.text, msgY, 14f * density, 0xFFEFE7D6,
+                    (int) (235 * alpha));
+            msgY -= 24f * density;
+            shown++;
+        }
+
+        // 互动按钮
+        boolean active = game.interactLabel.length() > 0;
+        paint.reset();
+        paint.setAntiAlias(true);
+        paint.setColor(active ? 0x66101010 : 0x33000000);
+        c.drawCircle(btnX, btnY, btnR, paint);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(2.5f * density);
+        paint.setColor(active ? 0xFFE8E6D9 : 0x55FFFFFF);
+        c.drawCircle(btnX, btnY, btnR, paint);
+        drawTextAt(c, active ? game.interactLabel : "·", btnX, btnY + 5f * density,
+                16f * density, active ? 0xFFE8E6D9 : 0x66FFFFFF, Paint.Align.CENTER);
+
+        // 手电筒按钮
+        if (p.hasFlashlight) {
             paint.reset();
             paint.setAntiAlias(true);
-            paint.setColor(lightningFlash > 4 ? 0x66FFFFFF : 0x26FFFFFF);
-            c.drawRect(0, 0, w, h, paint);
+            paint.setColor(0x33000000);
+            c.drawCircle(torchX, torchY, torchR, paint);
+            paint.setStyle(Paint.Style.STROKE);
+            paint.setStrokeWidth(2.5f * density);
+            paint.setColor(p.flashlightOn ? 0xFFF5E9A8 : 0x88FFFFFF);
+            c.drawCircle(torchX, torchY, torchR, paint);
+            // 手电筒小图标
+            paint.setStyle(Paint.Style.FILL);
+            paint.setColor(0xFF9AA1A6);
+            c.drawRect(torchX - 8f * density, torchY - 4f * density,
+                    torchX + 10f * density, torchY + 4f * density, paint);
+            paint.setColor(0xFF3B4247);
+            c.drawRect(torchX - 14f * density, torchY - 6f * density,
+                    torchX - 8f * density, torchY + 6f * density, paint);
+            paint.setColor(p.flashlightOn ? 0xFFF5E9A8 : 0xFF666055);
+            c.drawCircle(torchX - 11f * density, torchY, 3f * density, paint);
+            drawTextAt(c, "手电", torchX, torchY + 20f * density,
+                    11f * density, p.flashlightOn ? 0xFFF5E9A8 : 0x88FFFFFF, Paint.Align.CENTER);
         }
 
-        // 4) 余光瞥见：光圈外的她偶尔一闪
-        boolean ghostInLight = ghostActive
-                && dist(ghostX, ghostY, lightX, lightY) < lightRadius * 1.05f;
-        if (ghostActive && !ghostInLight && glimpseTimer < 14) {
-            drawGhost(c, ghostX, ghostY, 46);
-        }
+        // 虚拟摇杆
+        float jx = joyId == -1 ? defJoyX : joyBaseX;
+        float jy = joyId == -1 ? defJoyY : joyBaseY;
+        paint.reset();
+        paint.setAntiAlias(true);
+        paint.setStyle(Paint.Style.STROKE);
+        paint.setStrokeWidth(2f * density);
+        paint.setColor(0x55FFFFFF);
+        c.drawCircle(jx, jy, joyR, paint);
+        paint.setStyle(Paint.Style.FILL);
+        paint.setColor(0x883A3F44);
+        c.drawCircle(jx + joyVecX * joyR * 0.55f, jy + joyVecY * joyR * 0.55f,
+                24f * density, paint);
 
-        // 5) HUD
-        drawHud(c);
-
-        // 6) 教学与低电提示
-        if (night == 1 && nightFrames < 360) {
-            int a = nightFrames < 300 ? 220 : (360 - nightFrames) * 4;
-            drawTextCenter(c, "在黑暗中拖动，寻找符纸", h * 0.70f, 15f * density, 0xFFD9D7C7,
-                    Math.max(0, Math.min(255, a)));
-        }
-        if (battery < 20f && (frame / 16) % 2 == 0) {
-            drawTextCenter(c, "手电筒在变暗……", h * 0.115f, 13f * density, 0xFFCC4444, 230);
+        // 地下室黑暗提示
+        if (p.floor == LevelMap.B1 && !p.flashlightOn) {
+            int pulse = 120 + (int) (110 * (0.5 + 0.5 * Math.sin(game.timePlayed * 6f)));
+            drawTextCenter(c, "太黑了——打开手电筒！", h * 0.30f,
+                    15f * density, 0xFFCC4444, pulse);
         }
     }
 
-    private void renderScare(Canvas c) {
+    private void drawIcon(Canvas c, Bitmap bmp, float x, float y, float size) {
+        paint.reset();
+        paint.setAntiAlias(true);
+        paint.setFilterBitmap(true);
+        c.drawBitmap(bmp, null, new RectF(x, y, x + size, y + size), paint);
+    }
+
+    // ------------------------------------------------------------------
+    // 开场 / 胜利
+    // ------------------------------------------------------------------
+
+    private static final String[][] INTRO_PAGES = {
+            {"……消毒水的气味。", "你在青山病院的病床上醒来。", "头很沉——你想不起自己为什么在这里。"},
+            {"房门锁着。", "走廊尽头，有什么东西", "在轻轻地、轻轻地拖行。"},
+            {"逃出去。", "（左手拖动 移动 · 右手滑动 转身）", "（右下按钮：开门 / 撬板 / 刷卡）"},
+    };
+
+    private void drawIntro(Canvas c) {
         c.drawColor(0xFF040404);
-        int sc = c.save();
-        // 画面抖动
-        c.translate((rng.nextFloat() - 0.5f) * 14f * density,
-                (rng.nextFloat() - 0.5f) * 14f * density);
-        float cx = w / 2f;
-        float cy = h * 0.40f;
-
-        paint.reset();
-        paint.setAntiAlias(true);
-        paint.setColor(0xFFEDEDE6);                       // 脸
-        c.drawCircle(cx, cy, 118f * density, paint);
-        paint.setColor(0xFF0A0A0C);                       // 发际（盖住上半张脸）
-        c.drawCircle(cx, cy - 36f * density, 120f * density, paint);
-        paint.setColor(0xFF000000);                       // 双眼
-        c.drawCircle(cx - 44f * density, cy + 6f * density, 17f * density, paint);
-        c.drawCircle(cx + 44f * density, cy + 10f * density, 21f * density, paint);
-        c.drawOval(cx - 13f * density, cy + 48f * density,  // 拉长的嘴
-                cx + 13f * density, cy + 92f * density, paint);
-        // 雪花噪点
-        for (int i = 0; i < 70; i++) {
-            paint.setColor(0xFFFFFFFF);
-            paint.setAlpha(20 + rng.nextInt(110));
-            float y = rng.nextFloat() * h;
-            c.drawLine(0, y, w, y + (rng.nextFloat() * 8f - 4f) * density, paint);
+        drawTextCenter(c, "午 夜 病 栋", h * 0.15f, 42f * density, 0xFFE8E6D9, 255);
+        drawTextCenter(c, "MIDNIGHT WARD · 3D", h * 0.15f + 28f * density,
+                12f * density, 0xFF8A8F8C, 255);
+        String[] page = INTRO_PAGES[Math.min(game.introPage, INTRO_PAGES.length - 1)];
+        for (int i = 0; i < page.length; i++) {
+            drawTextCenter(c, page[i], h * 0.42f + i * 28f * density,
+                    15f * density, 0xFFCFCFC6, 235);
         }
-        paint.setAlpha(255);
-        c.restoreToCount(sc);
-
-        // 红色暗角
-        paint.reset();
-        paint.setAntiAlias(true);
-        paint.setShader(new RadialGradient(w / 2f, h / 2f, Math.max(w, h) * 0.7f,
-                new int[]{0x00000000, 0x66330000, 0xB0000000},
-                new float[]{0.35f, 0.75f, 1f}, Shader.TileMode.CLAMP));
-        c.drawRect(0, 0, w, h, paint);
-        paint.setShader(null);
-
-        drawTextCenter(c, "她 找 到 了 你", h * 0.78f, 30f * density, 0xFFFF5555, 255);
+        int breath = 120 + (int) (100 * (0.5 + 0.5 * Math.sin(game.timePlayed * 0.001f
+                + System.currentTimeMillis() * 0.004f)));
+        drawTextCenter(c, "—— 触摸继续 ——", h * 0.86f, 13f * density, 0xFFE8E6D9, breath);
     }
 
-    private void renderOver(Canvas c) {
-        c.drawColor(0xFF070707);
-        drawTextCenter(c, "你没能等到黎明", h * 0.34f, 30f * density, 0xFFCC4444, 255);
-        drawTextCenter(c, "倒在了 第 " + night + " 夜 · 符纸 " + talismansFound + " / " + talismansTotal,
-                h * 0.44f, 14f * density, 0xFFB9B7AC, 220);
-        int breath = 120 + (int) (100 * (0.5 + 0.5 * Math.sin(frame * 0.05)));
-        drawTextCenter(c, "—— 触摸屏幕 重试这一夜 ——", h * 0.62f, 15f * density, 0xFFE8E6D9, breath);
-    }
-
-    private void renderClear(Canvas c) {
-        c.drawColor(0xFF050807);
-        int breath = 170 + (int) (70 * (0.5 + 0.5 * Math.sin(frame * 0.06)));
-        drawTextCenter(c, "第 " + night + " 夜 · 你活了下来", h * 0.40f, 26f * density, 0xFFE8E6D9, breath);
-        if (night < TOTAL_NIGHTS) {
-            drawTextCenter(c, "天快亮了……但她还在附近的阴影里",
-                    h * 0.50f, 14f * density, 0xFF9AA09B, 220);
-        }
-    }
-
-    private void renderWin(Canvas c) {
-        // 黎明渐变天空
+    private void drawWin(Canvas c) {
         paint.reset();
         paint.setAntiAlias(true);
         paint.setShader(new LinearGradient(0, 0, 0, h,
@@ -551,246 +355,25 @@ public class GameView extends View {
                 new float[]{0f, 0.55f, 1f}, Shader.TileMode.CLAMP));
         c.drawRect(0, 0, w, h, paint);
         paint.setShader(null);
-
         // 病栋剪影
         paint.setColor(0xFF0B0B10);
         c.drawRect(0, h * 0.68f, w * 0.22f, h, paint);
         c.drawRect(w * 0.30f, h * 0.62f, w * 0.62f, h, paint);
         c.drawRect(w * 0.72f, h * 0.71f, w, h, paint);
-        paint.setColor(0x33E8C170);
-        c.drawRect(w * 0.40f, h * 0.70f, w * 0.45f, h * 0.74f, paint);
-        c.drawRect(w * 0.55f, h * 0.70f, w * 0.60f, h * 0.74f, paint);
 
-        drawTextCenter(c, "黎 明 来 临", h * 0.28f, 36f * density, 0xFFF5EFE0, 255);
-        drawTextCenter(c, "三夜已过。晨光爬上病栋的窗，", h * 0.40f, 14f * density, 0xFFEFE7D6, 230);
-        drawTextCenter(c, "她退回阴影深处——这一次，没有人被留下。",
-                h * 0.445f, 14f * density, 0xFFEFE7D6, 230);
-        drawTextCenter(c, "★ 真结局 · 超度 ★", h * 0.54f, 16f * density, 0xFFE8B15C, 255);
-        int breath = 120 + (int) (100 * (0.5 + 0.5 * Math.sin(frame * 0.05)));
-        drawTextCenter(c, "—— 触摸屏幕 再来一夜 ——", h * 0.82f, 15f * density, 0xFFF5EFE0, breath);
+        drawTextCenter(c, "你 推 开 了 大 门", h * 0.22f, 30f * density, 0xFFF5EFE0, 255);
+        drawTextCenter(c, "冷风灌进领口。", h * 0.36f, 14f * density, 0xFFEFE7D6, 235);
+        drawTextCenter(c, "身后的病栋在晨雾里沉默着——你逃出来了。", h * 0.40f, 14f * density, 0xFFEFE7D6, 235);
+        int sec = (int) game.timePlayed;
+        drawTextCenter(c, "逃脱用时  " + sec / 60 + " 分 " + (sec % 60) + " 秒",
+                h * 0.52f, 15f * density, 0xFFE8B15C, 255);
+        int breath = 120 + (int) (100 * (0.5 + 0.5 * Math.sin(System.currentTimeMillis() * 0.004f)));
+        drawTextCenter(c, "—— 触摸屏幕 · 再来一次 ——", h * 0.82f, 15f * density, 0xFFF5EFE0, breath);
     }
 
     // ------------------------------------------------------------------
-    // 场景与元素
+    // 文字工具
     // ------------------------------------------------------------------
-
-    private void drawScene(Canvas c) {
-        paint.reset();
-        paint.setAntiAlias(true);
-        // 墙 / 地板
-        paint.setColor(0xFF262B29);
-        c.drawRect(0, 0, w, h * 0.78f, paint);
-        paint.setColor(0xFF171412);
-        c.drawRect(0, h * 0.78f, w, h, paint);
-        // 地板缝
-        paint.setColor(0xFF241F1B);
-        paint.setStrokeWidth(1.5f * density);
-        for (int i = 1; i < 7; i++) {
-            float y = h * 0.78f + i * (h * 0.22f / 7f);
-            c.drawLine(0, y, w, y, paint);
-        }
-        // 墙裙
-        paint.setColor(0xFF1C2220);
-        c.drawRect(0, h * 0.70f, w, h * 0.78f, paint);
-
-        drawDoor(c, w * 0.050f, h * 0.30f, w * 0.260f, h * 0.92f, "301");
-        drawDoor(c, w * 0.395f, h * 0.32f, w * 0.605f, h * 0.92f, "302");
-        drawDoor(c, w * 0.740f, h * 0.28f, w * 0.950f, h * 0.92f, "?");
-        drawWindow(c, w * 0.290f, h * 0.10f, w * 0.440f, h * 0.27f);
-        drawWindow(c, w * 0.605f, h * 0.095f, w * 0.755f, h * 0.265f);
-        drawBed(c, w * 0.06f, h * 0.86f);
-        drawBed(c, w * 0.55f, h * 0.88f);
-        drawIV(c, w * 0.915f, h * 0.30f);
-
-        // 血迹
-        paint.reset();
-        paint.setAntiAlias(true);
-        paint.setColor(0xFF43100E);
-        c.drawCircle(w * 0.345f, h * 0.665f, 15f * density, paint);
-        c.drawCircle(w * 0.375f, h * 0.685f, 9f * density, paint);
-        c.drawCircle(w * 0.330f, h * 0.680f, 6f * density, paint);
-
-        // 物品
-        for (float[] t : talismans) {
-            drawTalisman(c, t[0], t[1], t[2]);
-        }
-        for (float[] b : batteries) {
-            drawBattery(c, b[0], b[1]);
-        }
-
-        // 她（画在场景层里，只在光圈内可见）
-        if (ghostActive) {
-            drawGhost(c, ghostX, ghostY, 235);
-        }
-    }
-
-    private void drawDoor(Canvas c, float l, float t, float r, float b, String no) {
-        paint.reset();
-        paint.setAntiAlias(true);
-        paint.setColor(0xFF2E241C);
-        c.drawRect(l, t, r, b, paint);
-        paint.setColor(0xFF3A2D22);
-        c.drawRect(l + 3f * density, t + 3f * density, r - 3f * density, b - 3f * density, paint);
-        // 门牌
-        paint.setColor(0xFFC9C6B8);
-        c.drawRect(l + (r - l) * 0.30f, t - 12f * density, l + (r - l) * 0.70f, t - 2f * density, paint);
-        textPaint.reset();
-        textPaint.setAntiAlias(true);
-        textPaint.setColor(0xFF111111);
-        textPaint.setTextAlign(Paint.Align.CENTER);
-        textPaint.setTextSize(8f * density);
-        c.drawText(no, (l + r) / 2f, t - 4.5f * density, textPaint);
-        // 把手
-        paint.setColor(0xFFB8A968);
-        c.drawCircle(r - 8f * density, (t + b) / 2f, 3f * density, paint);
-    }
-
-    private void drawWindow(Canvas c, float l, float t, float r, float b) {
-        paint.reset();
-        paint.setAntiAlias(true);
-        paint.setColor(0xFF11161C);
-        c.drawRect(l, t, r, b, paint);
-        paint.setColor(0x264C5E75); // 夜色微光
-        c.drawRect(l, t, r, b, paint);
-        paint.setColor(0xFF39424A);
-        paint.setStrokeWidth(2f * density);
-        float cx = (l + r) / 2f;
-        float cy = (t + b) / 2f;
-        c.drawLine(cx, t, cx, b, paint);
-        c.drawLine(l, cy, r, cy, paint);
-        paint.setStrokeWidth(3f * density);
-        c.drawRect(l, t, r, b, paint);
-        // 月光斜射到地面的光带
-        paint.reset();
-        paint.setAntiAlias(true);
-        paint.setColor(0x143E5C78);
-        c.drawRect(l - 10f * density, b, r + 26f * density, h * 0.78f, paint);
-    }
-
-    private void drawBed(Canvas c, float l, float t) {
-        float bw = w * 0.30f;
-        float bh = 14f * density;
-        paint.reset();
-        paint.setAntiAlias(true);
-        paint.setColor(0xFF3A3F3D);
-        c.drawRect(l, t, l + bw, t + bh, paint);
-        paint.setColor(0xFFD8D4C4); // 枕头
-        c.drawRect(l + 3f * density, t - 5f * density, l + bw * 0.22f, t + bh - 2f * density, paint);
-        paint.setColor(0xFF23272B);
-        c.drawRect(l, t + bh, l + bw, t + bh + 3f * density, paint);
-        paint.setStrokeWidth(3f * density);
-        c.drawLine(l + 4f * density, t + bh + 3f * density, l + 4f * density, t + bh + 12f * density, paint);
-        c.drawLine(l + bw - 4f * density, t + bh + 3f * density, l + bw - 4f * density, t + bh + 12f * density, paint);
-    }
-
-    private void drawIV(Canvas c, float x, float top) {
-        paint.reset();
-        paint.setAntiAlias(true);
-        paint.setColor(0xFF8E9296);
-        paint.setStrokeWidth(3f * density);
-        c.drawLine(x, top, x, top + 60f * density, paint);
-        paint.setColor(0xFF20262B);
-        c.drawRect(x - 6f * density, top + 6f * density, x + 6f * density, top + 26f * density, paint);
-    }
-
-    private void drawTalisman(Canvas c, float x, float y, float angle) {
-        int sc = c.save();
-        c.translate(x, y);
-        c.rotate(angle);
-        paint.reset();
-        paint.setAntiAlias(true);
-        int glow = 40 + (int) (26 * (0.5 + 0.5 * Math.sin(frame * 0.09f)));
-        paint.setColor(Color.argb(glow, 230, 200, 90));
-        c.drawCircle(0, 0, 26f * density, paint);
-        paint.setColor(0xFFE4D48A); // 纸
-        c.drawRect(-9f * density, -13f * density, 9f * density, 13f * density, paint);
-        paint.setColor(0xFF8A2B22); // 符纹
-        paint.setStrokeWidth(1.6f * density);
-        c.drawLine(-4f * density, -8f * density, 4f * density, 8f * density, paint);
-        c.drawLine(4f * density, -8f * density, -4f * density, 8f * density, paint);
-        c.drawLine(0, -10f * density, 0, 10f * density, paint);
-        c.restoreToCount(sc);
-    }
-
-    private void drawBattery(Canvas c, float x, float y) {
-        paint.reset();
-        paint.setAntiAlias(true);
-        int glow = 36 + (int) (22 * (0.5 + 0.5 * Math.sin(frame * 0.08f + 2f)));
-        paint.setColor(Color.argb(glow, 120, 220, 120));
-        c.drawCircle(x, y, 22f * density, paint);
-        paint.setColor(0xFF2E7D4F);
-        c.drawRect(x - 5f * density, y - 10f * density, x + 5f * density, y + 8f * density, paint);
-        paint.setColor(0xFFC9D3C6);
-        c.drawRect(x - 2.5f * density, y - 13f * density, x + 2.5f * density, y - 10f * density, paint);
-    }
-
-    private void drawGhost(Canvas c, float x, float y, int alpha) {
-        int sc = c.save();
-        float sway = ((float) Math.sin(ghostPhase)) * 6f * density;
-        c.translate(sway, 0f);
-        paint.reset();
-        paint.setAntiAlias(true);
-        // 白裙
-        paint.setColor(Color.argb(alpha, 233, 233, 226));
-        Path dress = new Path();
-        dress.moveTo(x, y - 44f * density);
-        dress.lineTo(x - 26f * density, y + 46f * density);
-        dress.lineTo(x + 26f * density, y + 46f * density);
-        dress.close();
-        c.drawPath(dress, paint);
-        // 头
-        c.drawCircle(x, y - 42f * density, 15f * density, paint);
-        // 长发
-        paint.setColor(Color.argb((int) (alpha * 0.92f), 12, 12, 16));
-        Path hair = new Path();
-        hair.moveTo(x - 17f * density, y - 40f * density);
-        hair.quadTo(x, y - 66f * density, x + 17f * density, y - 40f * density);
-        hair.lineTo(x + 23f * density, y + 6f * density);
-        hair.lineTo(x + 12f * density, y - 12f * density);
-        hair.lineTo(x + 6f * density, y + 26f * density);
-        hair.lineTo(x - 4f * density, y - 8f * density);
-        hair.lineTo(x - 12f * density, y + 22f * density);
-        hair.lineTo(x - 20f * density, y - 14f * density);
-        hair.close();
-        c.drawPath(hair, paint);
-        // 双眼
-        paint.setColor(Color.argb(alpha, 0, 0, 0));
-        c.drawCircle(x - 6f * density, y - 42f * density, 3.4f * density, paint);
-        c.drawCircle(x + 6f * density, y - 42f * density, 3.4f * density, paint);
-        c.restoreToCount(sc);
-    }
-
-    private void drawHud(Canvas c) {
-        textPaint.reset();
-        textPaint.setAntiAlias(true);
-        textPaint.setTypeface(bodyType);
-        textPaint.setColor(0xFFE8E6D9);
-        textPaint.setTextAlign(Paint.Align.LEFT);
-        textPaint.setTextSize(17f * density);
-        c.drawText("第 " + night + " 夜", 14f * density, 30f * density, textPaint);
-        c.drawText("符纸 " + talismansFound + " / " + talismansTotal, 14f * density, 52f * density, textPaint);
-
-        // 电量条
-        float bw = 104f * density;
-        float bh = 10f * density;
-        float bx = w - bw - 14f * density;
-        float by = 22f * density;
-        paint.reset();
-        paint.setAntiAlias(true);
-        paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(2f * density);
-        paint.setColor(0x80FFFFFF);
-        c.drawRect(bx, by, bx + bw, by + bh, paint);
-        paint.setStyle(Paint.Style.FILL);
-        paint.setColor(battery < 25f
-                ? (((frame / 12) % 2 == 0) ? 0xFFCC3333 : 0x55CC3333)
-                : 0xFFCDBB4C);
-        float fill = (bw - 4f * density) * (battery / 100f);
-        if (fill > 0f) {
-            c.drawRect(bx + 2f * density, by + 2f * density,
-                    bx + 2f * density + fill, by + bh - 2f * density, paint);
-        }
-    }
 
     private void drawTextCenter(Canvas c, String s, float y, float sizePx, int color, int alpha) {
         textPaint.reset();
@@ -803,28 +386,116 @@ public class GameView extends View {
         c.drawText(s, w / 2f, y, textPaint);
     }
 
+    private void drawTextAt(Canvas c, String s, float x, float y, float sizePx,
+                            int color, Paint.Align align) {
+        textPaint.reset();
+        textPaint.setAntiAlias(true);
+        textPaint.setTypeface(bodyType);
+        textPaint.setTextAlign(align);
+        textPaint.setTextSize(sizePx);
+        textPaint.setColor(color);
+        c.drawText(s, x, y, textPaint);
+    }
+
     // ------------------------------------------------------------------
-    // 杂项
+    // 触摸操控
     // ------------------------------------------------------------------
 
-    private void ensureDarkShader() {
-        if (darkShader == null || Math.abs(lightX - darkX) > 2f
-                || Math.abs(lightY - darkY) > 2f || Math.abs(lightRadius - darkR) > 4f) {
-            float r = Math.max(10f, lightRadius * 1.28f);
-            darkShader = new RadialGradient(lightX, lightY, r,
-                    new int[]{0x00000000, 0x00000000, 0xE6000000, 0xFF000000},
-                    new float[]{0f, 0.72f, 0.92f, 1f}, Shader.TileMode.CLAMP);
-            darkX = lightX;
-            darkY = lightY;
-            darkR = lightRadius;
+    @Override
+    public boolean onTouchEvent(MotionEvent e) {
+        switch (e.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+            case MotionEvent.ACTION_POINTER_DOWN: {
+                int idx = e.getActionIndex();
+                float x = e.getX(idx);
+                float y = e.getY(idx);
+                int id = e.getPointerId(idx);
+                if (game.state == Game.ST_INTRO) {
+                    game.introPage++;
+                    if (game.introPage >= INTRO_PAGES.length) {
+                        game.startPlay();
+                    }
+                    return true;
+                }
+                if (game.state == Game.ST_WIN) {
+                    game.reset();
+                    return true;
+                }
+                // 按钮
+                if (dist2(x, y, btnX, btnY) < (btnR * 1.4f) * (btnR * 1.4f)) {
+                    game.interact();
+                    return true;
+                }
+                if (game.player.hasFlashlight
+                        && dist2(x, y, torchX, torchY) < (torchR * 1.6f) * (torchR * 1.6f)) {
+                    game.player.flashlightOn = !game.player.flashlightOn;
+                    playTone(ToneGenerator.TONE_PROP_BEEP, 60);
+                    return true;
+                }
+                // 左侧摇杆 / 右侧转身
+                if (x < w * 0.45f) {
+                    joyId = id;
+                    joyBaseX = x;
+                    joyBaseY = y;
+                    joyVecX = 0f;
+                    joyVecY = 0f;
+                } else {
+                    lookId = id;
+                    lastLookX = x;
+                }
+                return true;
+            }
+            case MotionEvent.ACTION_MOVE: {
+                for (int i = 0; i < e.getPointerCount(); i++) {
+                    int id = e.getPointerId(i);
+                    float x = e.getX(i);
+                    float y = e.getY(i);
+                    if (id == joyId) {
+                        float dx = x - joyBaseX;
+                        float dy = y - joyBaseY;
+                        float m = (float) Math.sqrt(dx * dx + dy * dy);
+                        if (m > joyR) {
+                            dx = dx / m * joyR;
+                            dy = dy / m * joyR;
+                        }
+                        joyVecX = dx / joyR;
+                        joyVecY = dy / joyR;
+                    } else if (id == lookId) {
+                        game.player.angle += (x - lastLookX) * 0.0042f;
+                        lastLookX = x;
+                    }
+                }
+                return true;
+            }
+            case MotionEvent.ACTION_POINTER_UP:
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL: {
+                int idx = e.getActionIndex();
+                int id = e.getPointerId(idx);
+                if (id == joyId) {
+                    joyId = -1;
+                    joyVecX = 0f;
+                    joyVecY = 0f;
+                }
+                if (id == lookId) {
+                    lookId = -1;
+                }
+                return true;
+            }
+            default:
+                return true;
         }
     }
 
-    private static float dist(float x1, float y1, float x2, float y2) {
+    private static float dist2(float x1, float y1, float x2, float y2) {
         float dx = x1 - x2;
         float dy = y1 - y2;
-        return (float) Math.sqrt(dx * dx + dy * dy);
+        return dx * dx + dy * dy;
     }
+
+    // ------------------------------------------------------------------
+    // Game.Sound 实现
+    // ------------------------------------------------------------------
 
     private void playTone(int type, int ms) {
         if (tone != null) {
@@ -835,7 +506,50 @@ public class GameView extends View {
         }
     }
 
-    private void vibrate(long ms) {
+    @Override
+    public void beep() {
+        playTone(ToneGenerator.TONE_PROP_BEEP, 90);
+    }
+
+    @Override
+    public void ack() {
+        playTone(ToneGenerator.TONE_PROP_ACK, 130);
+    }
+
+    @Override
+    public void nack() {
+        playTone(ToneGenerator.TONE_PROP_NACK, 180);
+    }
+
+    @Override
+    public void creak() {
+        playTone(ToneGenerator.TONE_PROP_BEEP2, 220);
+        vibrate(90);
+    }
+
+    @Override
+    public void error() {
+        playTone(ToneGenerator.TONE_SUP_ERROR, 700);
+        vibrate(500);
+    }
+
+    @Override
+    public void whisper() {
+        playTone(ToneGenerator.TONE_PROP_BEEP2, 320);
+    }
+
+    @Override
+    public void thunder() {
+        playTone(ToneGenerator.TONE_PROP_NACK, 480);
+    }
+
+    @Override
+    public void beat() {
+        playTone(ToneGenerator.TONE_PROP_BEEP, 60);
+    }
+
+    @Override
+    public void vibrate(long ms) {
         try {
             if (Build.VERSION.SDK_INT >= 31) {
                 Object vm = getContext().getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
