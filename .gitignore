@@ -4,8 +4,10 @@ local.properties
 .idea/
 .DS_Store
 build/
-/captures
+build-desktop/
+build-android/
 .cxx/
+/captures
 *.apk
 *.aab
 *.jks

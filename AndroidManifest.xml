@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  《午夜病栋》纯 C++ 原生版 Android 清单
+  - android.app.NativeActivity：零 Java 代码，入口为 libmidnight_ward.so
+  - screenOrientation="landscape"：强制横屏（修复旧版竖屏锁死问题）
+  - hasCode=false：APK 内不含任何 DEX
+  - minSdk 21（Android 5.0+），targetSdk 34
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.midnight.ward"
+    android:versionCode="3"
+    android:versionName="2.0">
+
+    <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="34" />
+
+    <!-- 无任何权限：不联网、不读存储（存档写应用私有目录） -->
+
+    <application
+        android:label="午夜病栋"
+        android:icon="@mipmap/ic_launcher"
+        android:hasCode="false"
+        android:allowBackup="false"
+        android:extractNativeLibs="true"
+        android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
+
+        <activity
+            android:name="android.app.NativeActivity"
+            android:label="午夜病栋"
+            android:screenOrientation="landscape"
+            android:launchMode="singleTask"
+            android:exported="true"
+            android:configChanges="mcc|mnc|locale|touchscreen|keyboard|keyboardHidden|navigation|orientation|screenLayout|uiMode|screenSize|smallestScreenSize|density|fontScale">
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="midnight_ward" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

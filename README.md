@@ -1,77 +1,81 @@
-# 🏥 午夜病栋 3D (Midnight Ward 3D)
+# 午夜病栋 · 纯 C++ 原生版（Midnight Ward — Pure C++ Native）
 
-> 一款**纯 Java + 原生 Android Framework** 的第一人称 3D 恐怖解谜游戏。
-> 自研光线投射（Raycasting）引擎，零第三方依赖、零素材文件，推送到 GitHub 即由 **GitHub Actions** 自动编译出可直接安装的 APK。
+第一人称 3D 恐怖逃脱游戏，**全部逻辑与渲染均为 C++**（NativeActivity + 软件光投射渲染器），
+APK 内 **不含一行 Java、不含任何 DEX**（`android:hasCode="false"`）。
 
-![Build APK](https://github.com/qiqihelp/midnight-ward-android/actions/workflows/build-apk.yml/badge.svg)
+> 任务链：病床上醒来 → 找钥匙开病房门 → 二楼值班室拿房卡 → 一楼药房拿手电筒 →
+> 院长办公室拿地下室钥匙 → 铁门下地下室（开手电筒）→ 深处取撬棍 →
+> 回大门撬掉两根木板 → 刷房卡 → 逃出生天。
 
-## 📖 剧情与流程
+## 修复相对旧版（v1.x Java 版）的问题
 
-你在 1963 年废弃的青山病院的病床上醒来，什么都不记得，只知道自己必须**逃出去**：
+| 问题 | 旧版 | 本版 |
+| --- | --- | --- |
+| 启动闪退 | Java UI 层设备敏感 | 零 JVM 参与，核心经 ASan/UBSan 全量模糊测试 |
+| 无法横屏 | Manifest 锁死 `portrait` | **强制 `landscape`** + 全屏沉浸 |
+| 图标兼容性 | vector XML（老机型启动器易异常） | 全密度 PNG 图标 |
+| 进度丢失 | 无存档 | 自动存档 + 「继续游戏」 |
 
-1. 🛏️ **下床**，在病房里找到**钥匙**，打开反锁的房门
-2. 🗝️ 探索二楼：在**值班室**找到**房卡**
-3. 🪜 从楼梯下到一楼
-4. 🔦 在**药房**拿到**手电筒**、在**院长办公室**找到**地下室钥匙**
-5. ⬇️ 打开一楼尽头的**铁门**，进入漆黑的**地下室**（记得点亮手电筒——那里只有你的光）
-6. 🔧 拿到**撬棍**（小心身后……）
-7. 🚪 回到一楼大门：用**撬棍撬下两根木板** → 用**房卡在读卡器上刷卡** → **推门逃出**
-
-地图共三层：二楼病房区、一楼大厅（正门）、地下储物区。怨灵会不时在走廊深处显形；雷雨之夜，闪电会照亮整条走廊——包括她。
-
-## 🕹️ 操作
-
-| 操作 | 方式 |
-|---|---|
-| 移动 | 左半屏按住拖动（虚拟摇杆：前进/后退/左右平移） |
-| 转身 | 右半屏左右滑动 |
-| 互动 | 右下大按钮（开门 / 撬开 / 刷卡，靠近目标自动变化） |
-| 手电筒 | 右上手电按钮开关（拾取后出现） |
-| 拾取 | 走近物品自动拾取 |
-| 楼层 | 楼梯门靠近自动打开，走进即换层 |
-
-## 📲 安装 APK
-
-1. 打开本仓库 → **Actions** → 最近一次成功的 **Build APK** 运行
-2. 页面底部 **Artifacts** 下载 `MidnightWard-APK`
-3. 解压得到 `MidnightWard-v1.1-3D.apk`，传到手机安装（需允许"安装未知来源应用"）
-
-本地编译：`./gradlew assembleDebug`（要求 JDK 17+ / Android SDK 34）
-
-## 🤖 GitHub Actions 流水线
-
-`.github/workflows/build-apk.yml` 每次 push（或手动触发）自动执行：
-
-1. ✅ 检出代码 → 安装 JDK 17
-2. ✅ `./gradlew assembleDebug` 编译出 APK
-3. ✅ `aapt2 dump badging` 校验 APK 元信息
-4. ✅ **无头逻辑测试**：纯 Java 驱动游戏状态机，验证任务链完整可通关
-5. ✅ 上传 `MidnightWard-v1.1-3D.apk` 为 Artifact（保留 30 天）
-
-## 📁 项目结构
+## 技术架构
 
 ```
-midnight-ward-android/
-├── .github/workflows/build-apk.yml     # APK 编译流水线
-├── app/src/main/java/com/midnight/ward/
-│   ├── MainActivity.java               # 全屏入口
-│   ├── GameView.java                   # 帧循环 / 触摸操控 / HUD / 过场
-│   ├── Raycaster.java                  # 光线投射 3D 引擎（DDA + 薄门 + billboard + zbuffer）
-│   ├── Textures.java                   # 程序化贴图（墙面/门/物品/怨灵，全 Canvas 手绘）
-│   ├── Game.java                       # 任务状态机（纯 Java，可无头测试）
-│   ├── LevelMap.java                   # 三层地图 / 门锁 / 楼层传送
-│   ├── Player.java                     # 玩家与碰撞
-│   └── Sprite.java                     # 精灵模型
-├── app/src/main/res/                   # 主题 / 图标 / 字符串
-└── gradle wrapper + 构建脚本            # Gradle 8.7 + AGP 8.5.2
+src/
+├── core/            平台无关核心（桌面与 Android 共用同一份代码）
+│   ├── fb.cpp         RGBA 帧缓冲 + 2D 基元（矩形/圆/圆角/多边形/线条）
+│   ├── font.cpp       SDF 有向距离场字体（单图集任意字号清晰渲染中文）
+│   ├── levelmap.cpp   三层地图 / 门锁 / 楼层传送（Java 版 1:1 移植）
+│   ├── player.cpp     移动 + 碰撞
+│   ├── game.cpp       任务链状态机 / 互动 / 氛围事件 / 存档序列化
+│   ├── textures.cpp   程序化贴图（墙面×9 + 精灵×6，运行时生成，零素材）
+│   ├── raycaster.cpp  Wolfenstein 式 DDA 光投射 + 薄门滑开 + billboard 精灵
+│   │                  + zbuffer + 手电筒锥形光照
+│   ├── hud.cpp        HUD / 简介与胜利过场 / 虚拟摇杆触摸操控
+│   └── app.cpp        应用控制器（编排 + 自动存档）
+├── android/
+│   └── native_main.cpp  NativeActivity 入口（事件循环/触摸转发/上屏）
+└── desktop/
+    └── desktop_main.cpp 桌面模拟器 + 测试总成（与 Android 共用 core）
 ```
 
-## 🔧 技术说明
+- 字体：`scripts/gen_font_sdf.py` 扫描 `src/core/strings.h` 生成 SDF 图集 `assets/font_sdf.bin`
+- 图标：`scripts/gen_icons.py` 生成全密度 PNG
 
-- **3D 引擎**：经典 lodev 式 Raycasting——逐列 DDA 网格求交、薄门（滑门）半格平面求交、
-  billboard 精灵按深度排序 + zbuffer 逐列裁剪；离屏 300px 宽低分辨率渲染后放大（性能 + 复古质感）
-- **光照**：环境光距离衰减 + 手电筒锥形光束（含火苗抖动）+ N/S 侧面调暗；地下室环境光趋近于零
-- **贴图**：全部运行时用 Canvas 程序化生成（涂料墙 / 瓷砖墙裙 / 血迹墙 / 木门 / B1 铁门 / 楼梯 /
-  带木板和读卡器的大门 / 钥匙 / 房卡 / 手电筒 / 撬棍 / 病床 / 怨灵），APK 内没有任何图片文件
-- **游戏逻辑与渲染完全解耦**：`Game.java` 无 Android 依赖，CI 中直接 `javac + java` 无头跑通任务链
-- 兼容 Android 5.0（API 21）及以上
+## 测试（防闪退的三道关）
+
+```bash
+bash scripts/build_desktop.sh asan          # ASan + UBSan 构建
+./build-desktop/mw --logic                  # 完整任务链无头通关（含全部断言）
+./build-desktop/mw --saveload               # 存档往返 / 损坏存档防护 / 继续游戏
+./build-desktop/mw --fuzz --min 2 --seed 7  # 随机触摸 + 随机传送模糊测试
+./build-desktop/mw --sim --dir /tmp/sim     # 带渲染通关 + 里程碑截图
+```
+
+## 构建 APK
+
+```bash
+# 本地（需 NDK / build-tools / platform-34）
+export NDK=... BT=... PLAT=... JAVA_HOME=...
+bash scripts/build_android.sh   # 4 ABI：arm64-v8a armeabi-v7a x86_64 x86
+bash scripts/package_apk.sh     # aapt2 + zipalign + apksigner（不经 Gradle）
+```
+
+GitHub Actions 推送即构建：`.github/workflows/build-apk.yml`
+（桌面回归测试 → NDK 编译 → 打包 → badging/横屏/无 DEX 断言 → 上传产物）。
+
+## 安装
+
+1. **卸载旧版**（v1.x 与本版调试签名不同，需先卸载）
+2. 下载 Actions 产物 `midnight-ward-cpp-apk`，安装 `MidnightWard-v2.0-cpp.apk`
+3. 需要 Android 5.0+；无任何权限申请
+
+## 操作
+
+- 左半屏拖动 = 移动（虚拟摇杆）
+- 右半屏左右滑动 = 转身
+- 右下大按钮 = 开门 / 撬板 / 刷卡
+- 右上按钮 = 手电筒开关（地下室必备）
+- 返回键在游戏中被吞掉防误退，主界面按返回正常退出
+
+## 目录说明
+
+- `legacy-java3d/`：旧版 Java 工程存档（仅作参照，不参与构建）
