@@ -7,8 +7,8 @@ cd "$(dirname "$0")/.."
 : "${BT:?需要设置 BT 指向 build-tools 目录}"
 : "${PLAT:?需要设置 PLAT 指向 platforms/android-XX 目录}"
 JDK_BIN="${JDK_BIN:-${JAVA_HOME}/bin}"
-OUT="${OUT:-MidnightWard-v2.0-cpp.apk}"
-ABIS="${ABIS:-arm64-v8a armeabi-v7a x86_64 x86}"
+OUT="${OUT:-MidnightWard-v2.1-cpp.apk}"
+ABIS="${ABIS:-arm64-v8a}"
 STAGE=build-android/pkg
 
 rm -rf "$STAGE"

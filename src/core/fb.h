@@ -46,6 +46,8 @@ struct FB {
     void fillPoly(const float* pts, int n, Col c);
     // 整数倍最近邻放大/平铺拷贝：把 src 拉伸绘制到 (dx,dy,dw,dh)
     void blitScaled(const FB& src, int dx, int dy, int dw, int dh);
+    // 双线性放大拷贝（3D 层上屏专用，输出不透明，消除大颗粒像素）
+    void blitScaledBilinear(const FB& src, int dx, int dy, int dw, int dh);
     // 1:1 带透明度拷贝（纹理/精灵）
     void blit(const FB& src, int dx, int dy, int alpha255 = 255);
 };

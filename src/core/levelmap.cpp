@@ -150,6 +150,15 @@ bool LevelMap::validate() const {
     };
     for (const auto& d : ITEM_DEFS)
         if (cellAt(d[0], d[1], d[2]) != lm::CELL_FLOOR) return false;
+    // 字条落点（与 Game::reset 的 NOTE_DEFS 一致，取整为格）
+    static const float NOTE_DEFS[][3] = {
+        {lm::F2, 3.1f, 4.3f}, {lm::F2, 4.0f, 9.4f}, {lm::F2, 5.0f, 13.4f},
+        {lm::F1, 12.0f, 8.6f}, {lm::F1, 13.5f, 4.8f}, {lm::B1, 5.0f, 7.5f},
+        {lm::B1, 15.0f, 11.5f}, {lm::F1, 14.1f, 14.75f},
+    };
+    for (const auto& d : NOTE_DEFS)
+        if (cellAt((int)d[0], (int)std::floor(d[1]), (int)std::floor(d[2]))
+            != lm::CELL_FLOOR) return false;
     // 传送：源必须是门格，目的地必须是地板
     for (const auto& e : transitions) {
         // 解析 key "f:x:y"

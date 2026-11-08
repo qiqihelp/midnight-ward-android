@@ -10,6 +10,15 @@
 #include <string>
 #include <vector>
 
+// 字条内容（文案常量在 strings.h，保证字体子集覆盖）
+namespace notes {
+struct NoteDef {
+    const char* title;
+    const char* lines[6]; // nullptr 结尾
+};
+extern const NoteDef ALL[]; // 共 Game::NOTE_COUNT 条
+} // namespace notes
+
 struct Sprite {
     static constexpr int TYPE_KEY = 0;      // 病房钥匙
     static constexpr int TYPE_CARD = 1;     // 房卡
@@ -18,10 +27,12 @@ struct Sprite {
     static constexpr int TYPE_CROWBAR = 4;  // 撬棍
     static constexpr int TYPE_BED = 5;      // 病床（陈设）
     static constexpr int TYPE_GHOST = 6;    // 怨灵（氛围）
+    static constexpr int TYPE_NOTE = 7;     // 字条
 
     float x = 0, y = 0;
     int floor = 0;
     int type = 0;
+    int noteId = -1;       // TYPE_NOTE 专用：字条编号
     bool alive = true;
     bool pickable = false;
     float alpha = 1.f;
@@ -38,6 +49,8 @@ public:
     static constexpr int ST_PLAY = 1;
     static constexpr int ST_WIN = 2;
     static constexpr int ST_CHOOSE = 3; // 检测到存档：继续 / 重新开始
+
+    static constexpr int NOTE_COUNT = 8; // 字条总数
 
     struct Msg {
         std::string text;
@@ -60,6 +73,11 @@ public:
     std::vector<Sprite> sprites;
     std::unique_ptr<Sprite> ghost; // 动态怨灵（氛围）
     float ghostLife = 0.f;
+
+    // 字条：已读标记 / 当前展开 / 档案列表（展开时游戏暂停）
+    std::vector<bool> noteRead;      // reset() 时置为 NOTE_COUNT 个 false
+    int readingNote = -1;   // >= 0：正在阅读某张字条
+    bool archiveOpen = false; // 档案列表打开
 
     std::vector<Msg> messages;
 
@@ -86,6 +104,9 @@ public:
     void update(float dt);
     void interact();
     const char* questText() const;
+    // 当前目标在世界中的落点（小地图金色标记用）
+    void questTarget(int& floor, float& x, float& y) const;
+    int notesReadCount() const;
 
     // 存档序列化（App 层负责读写文件）
     bool serialize(std::vector<uint8_t>& out) const;

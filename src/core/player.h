@@ -14,6 +14,7 @@ public:
     bool hasKey = false, hasCard = false, hasFlashlight = false;
     bool flashlightOn = false, hasBasementKey = false, hasCrowbar = false;
     float walkPhase = 0.f;
+    float pitch = 0.f; // 俯仰视角（-0.30..0.30，屏高比例；不存档）
 
     void reset(const LevelMap& lm);
     // forward 前+ / 后-，strafe 右+ / 左-；分轴碰撞，避免卡角

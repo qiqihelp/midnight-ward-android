@@ -23,12 +23,18 @@ void Textures::init() {
     walls[T_GATE_CARD] = makeTex(TS, TS); gateBase(walls[T_GATE_CARD], rng);
     cardReader(walls[T_GATE_CARD]);
 
+    flats[FL_HALL] = makeTex(FS, FS);     floorHall(flats[FL_HALL], rng);
+    flats[FL_B1] = makeTex(FS, FS);       floorB1(flats[FL_B1], rng);
+    flats[CE_HALL] = makeTex(FS, FS);     ceilHall(flats[CE_HALL], rng);
+    flats[CE_B1] = makeTex(FS, FS);       ceilB1(flats[CE_B1], rng);
+
     sprites[S_KEY] = makeTex(32, 32);     keySprite(sprites[S_KEY]);
     sprites[S_CARD] = makeTex(32, 32);    cardSprite(sprites[S_CARD]);
     sprites[S_TORCH] = makeTex(32, 32);   torchSprite(sprites[S_TORCH]);
     sprites[S_CROWBAR] = makeTex(32, 32); crowbarSprite(sprites[S_CROWBAR]);
     sprites[S_GHOST] = makeTex(48, 72);   ghostSprite(sprites[S_GHOST]);
     sprites[S_BED] = makeTex(64, 40);     bedSprite(sprites[S_BED]);
+    sprites[S_NOTE] = makeTex(32, 32);    noteSprite(sprites[S_NOTE]);
 }
 
 // ---------------------------------------------------------------------------
@@ -180,6 +186,120 @@ void Textures::cardReader(FB& c) {
 }
 
 // ---------------------------------------------------------------------------
+// 地板 / 天花板（透视投射贴图，128px = 2×2 世界格）
+// ---------------------------------------------------------------------------
+
+void Textures::floorHall(FB& c, TexRng& rng) {
+    // 双色棋格医用地砖（同色系微差，避免喧宾夺主）
+    for (int ty = 0; ty < 2; ty++)
+        for (int tx = 0; tx < 2; tx++) {
+            bool odd = (tx + ty) & 1;
+            Col base = odd ? Col(0x35, 0x3C, 0x37) : Col(0x3D, 0x45, 0x3E);
+            c.fill(tx * 64, ty * 64, 64, 64, base);
+        }
+    // 磨缝（每砖边缘略暗）
+    for (int ty = 0; ty < 2; ty++)
+        for (int tx = 0; tx < 2; tx++)
+            c.strokeRect(tx * 64 + 1, ty * 64 + 1, 62, 62, 1.5f,
+                         Col(0x25, 0x2B, 0x27));
+    // 32px 子格浅缝（细地砖观感）
+    for (int y = 0; y <= 128; y += 32)
+        c.drawLine(0, (float)y, 128, (float)y, 1, Col(0x2C, 0x33, 0x2D));
+    for (int x = 0; x <= 128; x += 32)
+        c.drawLine((float)x, 0, (float)x, 128, 1, Col(0x2C, 0x33, 0x2D));
+    // 磨损噪点
+    for (int i = 0; i < 240; i++) {
+        float x = rng.nextFloat() * 128.f;
+        float y = rng.nextFloat() * 128.f;
+        c.fill((int)x, (int)y, 2, 2,
+               rng.nextBool() ? Col(0x2D, 0x34, 0x2F) : Col(0x46, 0x4E, 0x47));
+    }
+    // 划痕
+    for (int i = 0; i < 9; i++) {
+        float x = rng.nextFloat() * 120.f;
+        float y = rng.nextFloat() * 120.f;
+        c.drawLine(x, y, x + rng.nextFloat() * 12.f - 6.f,
+                   y + rng.nextFloat() * 12.f - 6.f, 1, Col(0x24, 0x2A, 0x26));
+    }
+    // 淡红拖痕（恐怖氛围）
+    for (int i = 0; i < 3; i++) {
+        float x = 20.f + rng.nextFloat() * 88.f;
+        float y0 = 8.f + rng.nextFloat() * 36.f;
+        c.drawLine(x, y0, x + 5.f, y0 + 46.f + rng.nextFloat() * 36.f, 3,
+                   Col(0x3E, 0x15, 0x11));
+    }
+}
+
+void Textures::floorB1(FB& c, TexRng& rng) {
+    c.fill(0, 0, 128, 128, Col(0x40, 0x40, 0x43));
+    for (int i = 0; i < 420; i++) {
+        float x = rng.nextFloat() * 128.f;
+        float y = rng.nextFloat() * 128.f;
+        c.fill((int)x, (int)y, 2, 2,
+               rng.nextBool() ? Col(0x38, 0x38, 0x3B) : Col(0x4A, 0x4A, 0x4D));
+    }
+    // 裂缝（折线）
+    for (int i = 0; i < 4; i++) {
+        float x = 10.f + rng.nextFloat() * 100.f;
+        float y = 0.f;
+        for (int k = 0; k < 4; k++) {
+            float nx = x + rng.nextFloat() * 18.f - 9.f;
+            float ny = y + 22.f + rng.nextFloat() * 12.f;
+            c.drawLine(x, y, nx, ny, 1, Col(0x27, 0x27, 0x2A));
+            x = nx; y = ny;
+        }
+    }
+    // 油渍
+    for (int i = 0; i < 5; i++)
+        c.fillCircle(rng.nextFloat() * 128.f, rng.nextFloat() * 128.f,
+                     4.f + rng.nextFloat() * 9.f, Col(0x2A, 0x2B, 0x2E));
+}
+
+void Textures::ceilHall(FB& c, TexRng& rng) {
+    // 天花板面板（64px = 1 格）
+    c.fill(0, 0, 128, 128, Col(0x2E, 0x32, 0x36));
+    for (int y = 0; y <= 128; y += 64)
+        c.drawLine(0, (float)y, 128, (float)y, 2, Col(0x23, 0x27, 0x2B));
+    for (int x = 0; x <= 128; x += 64)
+        c.drawLine((float)x, 0, (float)x, 128, 2, Col(0x23, 0x27, 0x2B));
+    for (int i = 0; i < 130; i++) {
+        float x = rng.nextFloat() * 128.f;
+        float y = rng.nextFloat() * 128.f;
+        c.fill((int)x, (int)y, 2, 1,
+               rng.nextBool() ? Col(0x29, 0x2D, 0x31) : Col(0x34, 0x38, 0x3C));
+    }
+    // 灯盘：仅 (0,0) 砖中央 → 世界里每 2 格一盏灯
+    c.fill(14, 14, 36, 36, Col(0xFF, 0xF4, 0xD2));
+    c.strokeRect(14, 14, 36, 36, 3, Col(0xA9, 0xA3, 0x88));
+    for (int x = 22; x < 48; x += 8)
+        c.fill(x, 16, 1, 32, Col(0xE2, 0xD6, 0xAC));
+    c.fill(14, 14, 36, 2, Col(0xFF, 0xFF, 0xEC)); // 高光
+    // alpha 后处理：非灯盘 0，灯盘 255（渲染端用作发光标记）
+    for (size_t i = 0; i < c.px.size() / 4; i++) c.px[i * 4 + 3] = 0;
+    for (int y = 15; y < 49; y++)
+        for (int x = 15; x < 49; x++)
+            c.px[((size_t)y * c.w + x) * 4 + 3] = 255;
+}
+
+void Textures::ceilB1(FB& c, TexRng& rng) {
+    c.fill(0, 0, 128, 128, Col(0x30, 0x32, 0x34));
+    for (int i = 0; i < 300; i++) {
+        float x = rng.nextFloat() * 128.f;
+        float y = rng.nextFloat() * 128.f;
+        c.fill((int)x, (int)y, 2, 2,
+               rng.nextBool() ? Col(0x2A, 0x2C, 0x2E) : Col(0x38, 0x3A, 0x3C));
+    }
+    // 两根横贯管线 + 吊环
+    c.fill(0, 28, 128, 8, Col(0x2F, 0x33, 0x35));
+    c.fill(0, 28, 128, 2, Col(0x3B, 0x3F, 0x41));
+    c.fill(0, 52, 128, 5, Col(0x28, 0x2C, 0x2E));
+    for (int x = 14; x < 128; x += 44)
+        c.fill(x, 34, 3, 10, Col(0x24, 0x28, 0x2A));
+    // 无灯：alpha 全 0
+    for (size_t i = 0; i < c.px.size() / 4; i++) c.px[i * 4 + 3] = 0;
+}
+
+// ---------------------------------------------------------------------------
 // 精灵
 // ---------------------------------------------------------------------------
 
@@ -270,6 +390,22 @@ void Textures::bedSprite(FB& c) {
     // 脚轮
     c.fillCircle(16, 30, 3, Col::argb(0xFF191D20));
     c.fillCircle(52, 30, 3, Col::argb(0xFF191D20));
+}
+
+void Textures::noteSprite(FB& c) {
+    // 微光晕（黑暗中可见）
+    c.fillCircle(16, 17, 12, Col(0xF2, 0xF2, 0xE6, 0x2E));
+    c.fillCircle(16, 17, 8, Col(0xF2, 0xF2, 0xE6, 0x30));
+    // 纸张（略斜）
+    float pts[] = {9, 8, 24, 6, 26, 24, 11, 26};
+    c.fillPoly(pts, 4, Col(0xEC, 0xE8, 0xD8));
+    // 字迹行
+    c.drawLine(12, 11, 22, 10, 1, Col(0xB8, 0xB0, 0x98));
+    c.drawLine(12, 15, 23, 14, 1, Col(0x8A, 0x84, 0x70));
+    c.drawLine(12, 19, 21, 18, 1, Col(0x8A, 0x84, 0x70));
+    c.drawLine(13, 23, 19, 22, 1, Col(0x8A, 0x84, 0x70));
+    // 角落红章
+    c.fillCircle(22, 21, 2, Col(0x8C, 0x2C, 0x24));
 }
 
 // 3×5 微型像素字（数字 + B）

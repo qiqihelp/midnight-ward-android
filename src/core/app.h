@@ -75,7 +75,7 @@ private:
     bool mapValid_ = true;
     std::mt19937 rng_{12345u};
 
-    static constexpr int LO_RES_W = 300; // 3D 渲染宽度（像素风）
+    static constexpr int LO_RES_W = 720; // 3D 渲染宽度（透视贴图 + 双线性上屏）
 
     void saveNow_();
 };

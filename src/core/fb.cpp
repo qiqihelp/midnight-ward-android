@@ -245,6 +245,49 @@ void FB::blitScaled(const FB& src, int dx, int dy, int dw, int dh) {
     }
 }
 
+void FB::blitScaledBilinear(const FB& src, int dx, int dy, int dw, int dh) {
+    if (!valid() || !src.valid() || dw <= 0 || dh <= 0) return;
+    if (src.w < 2 || src.h < 2) { blitScaled(src, dx, dy, dw, dh); return; }
+    int x0 = std::max(0, dx), y0 = std::max(0, dy);
+    int x1 = std::min(w, dx + dw), y1 = std::min(h, dy + dh);
+    float sxScale = (float)src.w / (float)dw;
+    float syScale = (float)src.h / (float)dh;
+    int sw = src.w, sh = src.h;
+    for (int yy = y0; yy < y1; yy++) {
+        // 目标像素中心 → 源浮点坐标
+        float fy = (yy - dy + 0.5f) * syScale - 0.5f;
+        if (fy < 0.f) fy = 0.f;
+        if (fy > sh - 1.001f) fy = sh - 1.001f;
+        int vy0 = (int)fy;
+        int vy1 = vy0 + 1 < sh ? vy0 + 1 : sh - 1;
+        float ty = fy - vy0;
+        const uint8_t* r0 = src.row(vy0);
+        const uint8_t* r1 = src.row(vy1);
+        uint8_t* drow = row(yy);
+        for (int xx = x0; xx < x1; xx++) {
+            float fx = (xx - dx + 0.5f) * sxScale - 0.5f;
+            if (fx < 0.f) fx = 0.f;
+            if (fx > sw - 1.001f) fx = sw - 1.001f;
+            int ux0 = (int)fx;
+            int ux1 = ux0 + 1 < sw ? ux0 + 1 : sw - 1;
+            float tx = fx - ux0;
+            const uint8_t* a = r0 + (size_t)ux0 * 4;
+            const uint8_t* b = r0 + (size_t)ux1 * 4;
+            const uint8_t* c = r1 + (size_t)ux0 * 4;
+            const uint8_t* d = r1 + (size_t)ux1 * 4;
+            uint8_t* o = drow + (size_t)xx * 4;
+            unsigned w00 = (unsigned)((1.f - tx) * (1.f - ty) * 256.f + 0.5f);
+            unsigned w10 = (unsigned)(tx * (1.f - ty) * 256.f + 0.5f);
+            unsigned w01 = (unsigned)((1.f - tx) * ty * 256.f + 0.5f);
+            unsigned w11 = (unsigned)(tx * ty * 256.f + 0.5f);
+            o[0] = (uint8_t)((a[0] * w00 + b[0] * w10 + c[0] * w01 + d[0] * w11) >> 8);
+            o[1] = (uint8_t)((a[1] * w00 + b[1] * w10 + c[1] * w01 + d[1] * w11) >> 8);
+            o[2] = (uint8_t)((a[2] * w00 + b[2] * w10 + c[2] * w01 + d[2] * w11) >> 8);
+            o[3] = 255;
+        }
+    }
+}
+
 void FB::blit(const FB& src, int dx, int dy, int alpha255) {
     if (!valid() || !src.valid() || alpha255 <= 0) return;
     int x0 = std::max(0, dx), y0 = std::max(0, dy);

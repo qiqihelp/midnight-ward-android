@@ -15,6 +15,7 @@ struct TexRng {
 class Textures {
 public:
     static constexpr int TS = 64; // 墙纹理边长
+    static constexpr int FS = 128; // 平面（地板/天花板）纹理边长 = 2×2 格
 
     // 墙面纹理索引
     static constexpr int T_PLASTER = 0; // 涂料墙
@@ -27,6 +28,12 @@ public:
     static constexpr int T_GATE_1 = 7;  // 大门：一根木板
     static constexpr int T_GATE_CARD = 8; // 大门：读卡器
 
+    // 平面纹理索引（地板/天花板，透视投射）
+    static constexpr int FL_HALL = 0; // 医用地砖地板
+    static constexpr int FL_B1 = 1;   // 地下室水泥地板
+    static constexpr int CE_HALL = 2; // 天花板面板+灯盘（alpha=发光标记）
+    static constexpr int CE_B1 = 3;   // 地下室天花：水泥+管线
+
     // 精灵纹理索引
     static constexpr int S_KEY = 0;
     static constexpr int S_CARD = 1;
@@ -34,9 +41,11 @@ public:
     static constexpr int S_CROWBAR = 3;
     static constexpr int S_GHOST = 4;
     static constexpr int S_BED = 5;
+    static constexpr int S_NOTE = 6;
 
     FB walls[9];
-    FB sprites[6];
+    FB flats[4];
+    FB sprites[7];
 
     void init();
 
@@ -51,12 +60,18 @@ private:
     void plank(FB& c, TexRng& rng, int y);
     void cardReader(FB& c);
 
+    void floorHall(FB& c, TexRng& rng);
+    void floorB1(FB& c, TexRng& rng);
+    void ceilHall(FB& c, TexRng& rng);
+    void ceilB1(FB& c, TexRng& rng);
+
     void keySprite(FB& c);
     void cardSprite(FB& c);
     void torchSprite(FB& c);
     void crowbarSprite(FB& c);
     void ghostSprite(FB& c);
     void bedSprite(FB& c);
+    void noteSprite(FB& c);
 
     static void microText(FB& c, const char* s, int x, int y, Col cIn); // 3×5 像素字
 };

@@ -4,6 +4,28 @@
 #include <cmath>
 #include <cstring>
 
+namespace notes {
+// 字条内容表（与 str::NOTE_x 一一对应；顺序即 noteId）
+const NoteDef ALL[Game::NOTE_COUNT] = {
+    {str::NOTE_1_TITLE, {str::NOTE_1_L0, str::NOTE_1_L1, str::NOTE_1_L2,
+                          str::NOTE_1_L3, str::NOTE_1_L4, nullptr}},
+    {str::NOTE_2_TITLE, {str::NOTE_2_L0, str::NOTE_2_L1, str::NOTE_2_L2,
+                          str::NOTE_2_L3, str::NOTE_2_L4, nullptr}},
+    {str::NOTE_3_TITLE, {str::NOTE_3_L0, str::NOTE_3_L1, str::NOTE_3_L2,
+                          str::NOTE_3_L3, str::NOTE_3_L4, nullptr}},
+    {str::NOTE_4_TITLE, {str::NOTE_4_L0, str::NOTE_4_L1, str::NOTE_4_L2,
+                          str::NOTE_4_L3, nullptr, nullptr}},
+    {str::NOTE_5_TITLE, {str::NOTE_5_L0, str::NOTE_5_L1, str::NOTE_5_L2,
+                          str::NOTE_5_L3, str::NOTE_5_L4, nullptr}},
+    {str::NOTE_6_TITLE, {str::NOTE_6_L0, str::NOTE_6_L1, str::NOTE_6_L2,
+                          str::NOTE_6_L3, nullptr, nullptr}},
+    {str::NOTE_7_TITLE, {str::NOTE_7_L0, str::NOTE_7_L1, str::NOTE_7_L2,
+                          str::NOTE_7_L3, str::NOTE_7_L4, str::NOTE_7_L5}},
+    {str::NOTE_8_TITLE, {str::NOTE_8_L0, str::NOTE_8_L1, str::NOTE_8_L2,
+                          str::NOTE_8_L3, str::NOTE_8_L4, nullptr}},
+};
+} // namespace notes
+
 Sprite::Sprite(int floor_, float x_, float y_, int type_)
     : x(x_), y(y_), floor(floor_), type(type_) {
     switch (type_) {
@@ -16,6 +38,8 @@ Sprite::Sprite(int floor_, float x_, float y_, int type_)
             height = 0.22f; aspect = 1.0f; pickable = true; break;
         case TYPE_CROWBAR:
             height = 0.30f; aspect = 1.0f; pickable = true; break;
+        case TYPE_NOTE:
+            height = 0.17f; aspect = 0.82f; pickable = true; break;
         case TYPE_BED:
             height = 0.42f; aspect = 1.6f; break;
         case TYPE_GHOST:
@@ -46,6 +70,25 @@ void Game::reset() {
     };
     for (const auto& d : ITEM_DEFS)
         sprites.emplace_back(d[0], d[1] + 0.5f, d[2] + 0.5f, d[3]);
+    // 字条布置（坐标落在必经之路上，走向目标即可看到；详见 README 任务链）
+    static const float NOTE_DEFS[][3] = {
+        {lm::F2, 3.1f, 4.3f},   // 1 病房内：醒来→钥匙的路上
+        {lm::F2, 4.0f, 9.4f},   // 2 二楼走廊：出病房去值班室的路上
+        {lm::F2, 5.0f, 13.4f},  // 3 值班室内：去房卡的路上
+        {lm::F1, 12.0f, 8.6f},  // 4 一楼大厅：大厅中央
+        {lm::F1, 13.5f, 4.8f},  // 5 院长办公室：去 B1 钥匙的路上
+        {lm::B1, 5.0f, 7.5f},   // 6 地下室入口：下梯后的路上
+        {lm::B1, 15.0f, 11.5f}, // 7 撬棍间：去撬棍的路上
+        {lm::F1, 14.1f, 14.75f},// 8 大门前：穿大厅去大门的路上
+    };
+    noteRead.assign(NOTE_COUNT, false);
+    readingNote = -1;
+    archiveOpen = false;
+    for (int i = 0; i < NOTE_COUNT; i++) {
+        sprites.emplace_back((int)NOTE_DEFS[i][0], NOTE_DEFS[i][1],
+                             NOTE_DEFS[i][2], Sprite::TYPE_NOTE);
+        sprites.back().noteId = i;
+    }
     ghost.reset();
     ghostLife = 0.f;
     messages.clear();
@@ -75,6 +118,8 @@ void Game::addMsg(const std::string& s) {
 void Game::update(float dt) {
     if (flashFrames > 0) flashFrames--;
     if (state != ST_PLAY) return;
+    // 阅读字条 / 档案打开时暂停世界（时间、门、怨灵、事件全部冻结）
+    if (readingNote >= 0 || archiveOpen) return;
     timePlayed += dt;
 
     updateFade(dt);
@@ -178,6 +223,12 @@ void Game::checkPickups() {
                 player.hasCrowbar = true;
                 addMsg(str::MSG_CROWBAR);
                 scare(); // 撬棍惊吓：背后显形
+                break;
+            case Sprite::TYPE_NOTE:
+                if (s.noteId >= 0 && s.noteId < NOTE_COUNT) {
+                    noteRead[s.noteId] = true;
+                    readingNote = s.noteId; // 展开阅读（暂停世界）
+                }
                 break;
             default: break;
         }
@@ -351,6 +402,27 @@ const char* Game::questText() const {
     return str::QUEST_8;
 }
 
+// 与 questText 同一决策链：返回当前目标的世界落点（小地图标记）
+void Game::questTarget(int& floor, float& x, float& y) const {
+    if (!player.hasKey) { floor = lm::F2; x = 2.5f; y = 5.5f; return; }
+    auto it = lm.doors.find(LevelMap::key(lm::F2, 3, 7));
+    if (it == lm.doors.end() || it->second.openness < 1.f) {
+        floor = lm::F2; x = 3.5f; y = 7.5f; return;
+    }
+    if (!player.hasCard)   { floor = lm::F2; x = 5.5f; y = 14.5f; return; }
+    if (!player.hasFlashlight) { floor = lm::F1; x = 4.5f; y = 3.5f; return; }
+    if (!player.hasBasementKey) { floor = lm::F1; x = 12.5f; y = 3.5f; return; }
+    if (!player.hasCrowbar) { floor = lm::B1; x = 16.5f; y = 11.5f; return; }
+    floor = lm::F1; x = 11.5f; y = 17.0f; // 大门（撬板 / 刷卡 / 逃出）
+}
+
+int Game::notesReadCount() const {
+    int n = 0;
+    for (int i = 0; i < NOTE_COUNT; i++)
+        if (i < (int)noteRead.size() && noteRead[i]) n++;
+    return n;
+}
+
 // ---------------------------------------------------------------------------
 // 存档
 // ---------------------------------------------------------------------------
@@ -379,7 +451,7 @@ static bool rF32(const std::vector<uint8_t>& in, size_t& p, float& v) {
 bool Game::serialize(std::vector<uint8_t>& out) const {
     out.clear();
     out.insert(out.end(), {'M', 'W', 'S', 'V'});
-    wU32(out, 2); // 版本
+    wU32(out, 3); // 版本：3 = 含字条精灵（14 个）；2 = 旧版（6 个，兼容读取）
     wF32(out, player.x); wF32(out, player.y); wF32(out, player.angle);
     wU32(out, (uint32_t)player.floor);
     wU32(out, (player.hasKey ? 1 : 0) | (player.hasCard ? 2 : 0)
@@ -408,7 +480,7 @@ bool Game::deserialize(const std::vector<uint8_t>& in) {
     if (in.size() < 12 || std::memcmp(in.data(), "MWSV", 4) != 0) return false;
     size_t p = 4;
     uint32_t ver;
-    if (!rU32(in, p, ver) || ver != 2) return false;
+    if (!rU32(in, p, ver) || (ver != 2 && ver != 3)) return false;
 
     Game fresh; // 解析到临时对象，全部成功后再提交（失败安全）
     float x, y, ang, tPlayed, gateOpenness_;
@@ -420,7 +492,10 @@ bool Game::deserialize(const std::vector<uint8_t>& in) {
     if (!rU32(in, p, boards_) || boards_ > 2) return false;
     if (!rU32(in, p, gateOpenU) || gateOpenU > 1) return false;
     if (!rF32(in, p, gateOpenness_) || gateOpenness_ < 0.f || gateOpenness_ > 1.f) return false;
-    if (!rU32(in, p, nSpr) || nSpr != fresh.sprites.size()) return false;
+    if (!rU32(in, p, nSpr)) return false;
+    // v3：全部 14 个精灵（6 物品 + 8 字条）；v2 旧档：仅 6 个物品
+    size_t expected = (ver == 3) ? fresh.sprites.size() : 6;
+    if (nSpr != expected) return false;
 
     fresh.player.x = x; fresh.player.y = y; fresh.player.angle = ang;
     fresh.player.floor = (int)floor_;
@@ -435,12 +510,19 @@ bool Game::deserialize(const std::vector<uint8_t>& in) {
     fresh.gateOpen = gateOpenU == 1;
     fresh.gateOpenness = gateOpenness_;
 
+    // 按顺序索引应用（reset() 的精灵顺序恒定，避免同类型多精灵歧义）
     for (uint32_t i = 0; i < nSpr; i++) {
         uint32_t ty, alv;
         if (!rU32(in, p, ty) || !rU32(in, p, alv) || alv > 1) return false;
-        for (auto& s : fresh.sprites)
-            if ((uint32_t)s.type == ty) { s.alive = alv == 1; break; }
+        if (i >= fresh.sprites.size()) return false;
+        if ((uint32_t)fresh.sprites[i].type != ty) return false; // 顺序即身份
+        fresh.sprites[i].alive = alv == 1;
     }
+    // 字条已读状态由字条精灵派生（v2 旧档无字条：全部未读）
+    for (const auto& s : fresh.sprites)
+        if (s.type == Sprite::TYPE_NOTE && s.noteId >= 0
+            && s.noteId < Game::NOTE_COUNT)
+            fresh.noteRead[s.noteId] = !s.alive;
     if (!rU32(in, p, nDoor) || nDoor != fresh.lm.doors.size()) return false;
     for (uint32_t i = 0; i < nDoor; i++) {
         uint32_t id, opening;
@@ -462,6 +544,9 @@ bool Game::deserialize(const std::vector<uint8_t>& in) {
     gateOpen = fresh.gateOpen;
     gateOpenness = fresh.gateOpenness;
     sprites = fresh.sprites;
+    noteRead = fresh.noteRead;
+    readingNote = -1;   // 阅读态不存档
+    archiveOpen = false;
     for (auto& kv : lm.doors) {
         auto it2 = fresh.lm.doors.find(kv.first);
         if (it2 != fresh.lm.doors.end()) {

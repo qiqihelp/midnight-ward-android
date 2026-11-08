@@ -97,7 +97,7 @@ void App::render() {
         default: {
             float bob = std::sin(game_.player.walkPhase) * loFb_.h * 0.012f;
             ray_.render(loFb_, game_, tex_, bob, flicker_);
-            winFb_.blitScaled(loFb_, 0, 0, winFb_.w, winFb_.h);
+            winFb_.blitScaledBilinear(loFb_, 0, 0, winFb_.w, winFb_.h);
             hud_.drawPlay(winFb_, game_, timeSecs_);
             // 闪电
             if (game_.flashFrames > 0) {
@@ -120,7 +120,12 @@ void App::touchUp(int id, float x, float y) { hud_.touchUp(id, x, y, game_); }
 void App::touchCancel() { hud_.touchCancel(); }
 
 bool App::back() {
-    if (game_.state == Game::ST_PLAY) return true; // 游戏中吞掉返回键，防误退
+    if (game_.state == Game::ST_PLAY) {
+        // 先关叠层（字条 / 档案），再防误退
+        if (game_.readingNote >= 0) { game_.readingNote = -1; return true; }
+        if (game_.archiveOpen) { game_.archiveOpen = false; return true; }
+        return true; // 游戏中吞掉返回键，防误退
+    }
     return false; // 其余界面允许系统退出
 }
 
