@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- 夜色底 -->
+    <path
+        android:fillColor="#101418"
+        android:pathData="M0,0h108v108h-108z" />
+    <!-- 残月 -->
+    <path
+        android:fillColor="#E8E6D9"
+        android:pathData="M63,30 a20,20 0 1,0 0,40 a26,26 0 1,1 0,-40 z" />
+    <!-- 红十字（病栋） -->
+    <path
+        android:fillColor="#7E1F1F"
+        android:pathData="M46,64 h6 v-6 h6 v6 h6 v6 h-6 v6 h-6 v-6 h-6 z" />
+</vector>
