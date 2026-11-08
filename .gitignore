@@ -12,3 +12,4 @@ build-android/
 *.aab
 *.jks
 *.keystore
+*.idsig
